@@ -166,7 +166,7 @@ struct RaceHUD: View {
     var body: some View {
         ZStack {
             VStack {
-                // Broadcast clock bug
+                // Broadcast clock bug: event · clock · sprint phase
                 HStack(spacing: 0) {
                     Text("M 100m")
                         .font(.system(size: 13, weight: .heavy))
@@ -178,8 +178,17 @@ struct RaceHUD: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12).padding(.vertical, 5)
                         .background(Color.black.opacity(0.75))
+                    if let phase = game.phaseLabel {
+                        Text(phase)
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(Style.gold)
+                            .padding(.horizontal, 10).padding(.vertical, 6.5)
+                            .background(Color.black.opacity(0.55))
+                            .transition(.opacity)
+                    }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .animation(.easeOut(duration: 0.2), value: game.phaseLabel)
                 .padding(.top, 14)
 
                 if let toast = game.splitToast {
@@ -211,57 +220,115 @@ struct RaceHUD: View {
                     }
             }
 
-            VStack {
+            VStack(spacing: 8) {
                 Spacer()
                 if let p = game.prompt {
                     Text(p)
                         .font(.system(size: 15, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.85))
                         .shadow(color: .black.opacity(0.8), radius: 6)
-                        .padding(.bottom, 6)
+                }
+                HStack(spacing: 10) {
+                    FormMeter(value: game.formValue)
+                    HStack(spacing: 4) {
+                        Text(game.speedText).font(Style.mono(18)).foregroundStyle(.white)
+                        Text("m/s").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 11).padding(.vertical, 5)
+                    .background(Style.panel, in: Capsule())
                 }
                 ProgressStrip(dots: game.miniMap)
                     .padding(.bottom, 16)
             }
 
-            // Speed readout
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text(game.speedText).font(Style.mono(20)).foregroundStyle(.white)
-                        Text("m/s").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.6))
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Style.panel, in: Capsule())
-                    .padding(.trailing, 18).padding(.bottom, 48)
-                }
-            }
-
-            // Side tap cues
-            if let side = game.nextSide {
-                HStack {
-                    sideCue(active: side == .left, label: "TAP")
-                    Spacer()
-                    sideCue(active: side == .right, label: "TAP")
-                }
-                .padding(.horizontal, 10)
+            // Metronome cues: pulse ON the beat — tap in sync with them.
+            if game.beatRef != nil {
+                MetronomeCues(beatRef: game.beatRef, interval: game.beatInterval,
+                              nextIsRight: game.beatNextIsRight)
+                    .padding(.horizontal, 10)
             }
         }
         .animation(.spring(duration: 0.3), value: game.splitToast)
         .animation(.easeOut(duration: 0.2), value: game.verdictFlash)
         .allowsHitTesting(false)
     }
+}
 
-    private func sideCue(active: Bool, label: String) -> some View {
-        Circle()
-            .fill(active ? Style.gold.opacity(0.30) : .clear)
-            .overlay(Circle().strokeBorder(active ? Style.gold : .white.opacity(0.10), lineWidth: 2))
-            .overlay(Text(label).font(.system(size: 11, weight: .heavy))
-                .foregroundStyle(active ? Style.gold : .white.opacity(0.2)))
-            .frame(width: 54, height: 54)
-            .animation(.easeOut(duration: 0.12), value: active)
+/// Rhythm quality made visible: this is the number that decides your speed.
+struct FormMeter: View {
+    let value: Double
+
+    private var color: Color {
+        if value >= 0.8 { return Style.gold }
+        if value >= 0.55 { return Color(red: 1.0, green: 0.62, blue: 0.2) }
+        return Style.bad
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("FORM")
+                .font(.system(size: 10, weight: .heavy))
+                .foregroundStyle(.white.opacity(0.6))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.14)).frame(width: 110, height: 7)
+                Capsule().fill(color)
+                    .frame(width: max(7, 110 * CGFloat(min(1, value))), height: 7)
+                    .animation(.linear(duration: 0.12), value: value)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Style.panel, in: Capsule())
+    }
+}
+
+/// Predictive tap cues: rings contract toward each side's next beat and flash on it.
+/// Anchored to the player's own last tap, so it teaches interval, not reaction.
+struct MetronomeCues: View {
+    let beatRef: Date?
+    let interval: Double
+    let nextIsRight: Bool
+
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            HStack {
+                cue(side: false, at: ctx.date)
+                Spacer()
+                cue(side: true, at: ctx.date)
+            }
+        }
+    }
+
+    /// side: false = left, true = right
+    private func cue(side: Bool, at now: Date) -> some View {
+        var flash: Double = 0     // 1 at the beat instant, decays over ~0.16s
+        var approach: Double = 0  // 0 far from this side's beat → 1 at the beat
+        if let ref = beatRef, interval > 0.05 {
+            let t = now.timeIntervalSince(ref)
+            let k = floor(t / interval)
+            let sinceBeat = t - k * interval
+            // Beat index 0 (at ref) belongs to `nextIsRight`; sides alternate.
+            let parity = ((Int(k) % 2) + 2) % 2
+            let beatIsRight = parity == 0 ? nextIsRight : !nextIsRight
+            if beatIsRight == side {
+                flash = max(0, 1 - sinceBeat / 0.16)
+            } else {
+                // This side owns the NEXT beat: contract toward it.
+                approach = sinceBeat / interval
+            }
+        }
+        return ZStack {
+            Circle()
+                .strokeBorder(Style.gold.opacity(0.25 + 0.5 * approach), lineWidth: 2)
+                .frame(width: 54 + 34 * (1 - approach), height: 54 + 34 * (1 - approach))
+                .opacity(approach > 0 ? 1 : 0)
+            Circle()
+                .fill(Style.gold.opacity(0.45 * flash))
+                .overlay(Circle().strokeBorder(Style.gold.opacity(0.3 + 0.7 * flash), lineWidth: 2.5))
+                .overlay(Text("TAP").font(.system(size: 11, weight: .heavy))
+                    .foregroundStyle(Style.gold.opacity(0.45 + 0.55 * flash)))
+                .frame(width: 54, height: 54)
+        }
+        .frame(width: 92, height: 92)
     }
 }
 

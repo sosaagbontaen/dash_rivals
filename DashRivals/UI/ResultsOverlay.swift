@@ -82,6 +82,9 @@ struct ResultsOverlay: View {
                         statRow("50M SPLIT", String(format: "%.2f", split), tag: nil, good: true)
                     }
                     statRow("TOP SPEED", String(format: "%.1f m/s", s.topSpeed), tag: nil, good: true)
+                    if s.leanCredit > 0.001 {
+                        statRow("LEAN", String(format: "−%.3f", s.leanCredit), tag: "DIP", good: true)
+                    }
                     if let pb = s.previousPB, !s.isNewPB {
                         statRow("YOUR BEST", String(format: "%.2f", pb), tag: nil, good: true)
                     }

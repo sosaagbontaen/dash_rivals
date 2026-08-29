@@ -31,24 +31,30 @@ final class RunnerFigure {
         let hair = Self.material(UIColor(white: 0.06, alpha: 1), roughness: 0.9)
         let bibMat = Self.material(UIColor(white: 0.95, alpha: 1), roughness: 0.9)
 
-        // Pelvis
+        // Pelvis — kept narrow; the shorts live on the thighs so they move with the legs.
         hips.position = SCNVector3(0, hipHeight, 0)
-        let pelvis = SCNNode(geometry: SCNBox(width: 0.29, height: 0.19, length: 0.17, chamferRadius: 0.07))
+        let pelvis = SCNNode(geometry: SCNBox(width: 0.26, height: 0.17, length: 0.155, chamferRadius: 0.06))
         pelvis.geometry?.materials = [shorts]
-        pelvis.position = SCNVector3(0, -0.01, 0)
+        pelvis.position = SCNVector3(0, -0.005, 0)
         hips.addChildNode(pelvis)
         root.addChildNode(hips)
 
-        // Torso
+        // Torso — broad chest, flat profile, tapering to the waist.
         torso.position = SCNVector3(0, 0.08, 0)
         hips.addChildNode(torso)
-        let chest = SCNNode(geometry: SCNCapsule(capRadius: 0.155, height: 0.56))
+        let chest = SCNNode(geometry: SCNCapsule(capRadius: 0.145, height: 0.50))
         chest.geometry?.materials = [vest]
-        chest.position = SCNVector3(0, 0.27, 0)
+        chest.scale = SCNVector3(1.22, 1.0, 0.78)
+        chest.position = SCNVector3(0, 0.285, 0)
         torso.addChildNode(chest)
+        let waist = SCNNode(geometry: SCNCapsule(capRadius: 0.115, height: 0.26))
+        waist.geometry?.materials = [vest]
+        waist.scale = SCNVector3(1.1, 1.0, 0.82)
+        waist.position = SCNVector3(0, 0.06, 0)
+        torso.addChildNode(waist)
         let bib = SCNNode(geometry: SCNBox(width: 0.15, height: 0.11, length: 0.012, chamferRadius: 0.01))
         bib.geometry?.materials = [bibMat]
-        bib.position = SCNVector3(0, 0.28, 0.145)
+        bib.position = SCNVector3(0, 0.27, 0.122)
         torso.addChildNode(bib)
 
         // Head
@@ -68,51 +74,73 @@ final class RunnerFigure {
         cap.position = SCNVector3(0, 0.165, -0.022)
         headPivot.addChildNode(cap)
 
-        // Arms
+        // Arms — deltoid caps hide the joint, blade hands for the sprinter look.
         func buildArm(_ shoulder: SCNNode, _ elbow: SCNNode, x: Float) {
-            shoulder.position = SCNVector3(x, 0.475, 0)
+            shoulder.position = SCNVector3(x, 0.46, 0)
             torso.addChildNode(shoulder)
-            let upper = SCNNode(geometry: SCNCapsule(capRadius: 0.049, height: 0.31))
+            let deltoid = SCNNode(geometry: SCNSphere(radius: 0.068))
+            deltoid.geometry?.materials = [skin]
+            deltoid.position = SCNVector3(x > 0 ? 0.012 : -0.012, 0.01, 0)
+            shoulder.addChildNode(deltoid)
+            let upper = SCNNode(geometry: SCNCapsule(capRadius: 0.047, height: 0.30))
             upper.geometry?.materials = [skin]
-            upper.position = SCNVector3(0, -0.145, 0)
+            upper.position = SCNVector3(0, -0.14, 0)
             shoulder.addChildNode(upper)
-            elbow.position = SCNVector3(0, -0.30, 0)
+            elbow.position = SCNVector3(0, -0.29, 0)
             shoulder.addChildNode(elbow)
-            let fore = SCNNode(geometry: SCNCapsule(capRadius: 0.041, height: 0.27))
+            let fore = SCNNode(geometry: SCNCapsule(capRadius: 0.038, height: 0.26))
             fore.geometry?.materials = [skin]
-            fore.position = SCNVector3(0, -0.125, 0)
+            fore.position = SCNVector3(0, -0.12, 0)
             elbow.addChildNode(fore)
-            let hand = SCNNode(geometry: SCNSphere(radius: 0.048))
+            let hand = SCNNode(geometry: SCNCapsule(capRadius: 0.03, height: 0.11))
             hand.geometry?.materials = [skin]
-            hand.position = SCNVector3(0, -0.27, 0)
+            hand.position = SCNVector3(0, -0.275, 0.012)
+            hand.eulerAngles = SCNVector3(0.25, 0, 0)
             elbow.addChildNode(hand)
         }
-        buildArm(shoulderL, elbowL, x: -0.235)
-        buildArm(shoulderR, elbowR, x: 0.235)
+        buildArm(shoulderL, elbowL, x: -0.245)
+        buildArm(shoulderR, elbowR, x: 0.245)
 
-        // Legs
+        // Legs — shorts ride the thigh, calves give the silhouette, spikes get a sole.
         func buildLeg(_ thigh: SCNNode, _ knee: SCNNode, _ ankle: SCNNode, x: Float) {
-            thigh.position = SCNVector3(x, -0.06, 0)
+            thigh.position = SCNVector3(x, -0.055, 0)
             hips.addChildNode(thigh)
-            let thighGeo = SCNNode(geometry: SCNCapsule(capRadius: 0.074, height: 0.46))
+            let thighGeo = SCNNode(geometry: SCNCapsule(capRadius: 0.068, height: 0.46))
             thighGeo.geometry?.materials = [skin]
             thighGeo.position = SCNVector3(0, -0.20, 0)
             thigh.addChildNode(thighGeo)
+            let shortLeg = SCNNode(geometry: SCNCapsule(capRadius: 0.079, height: 0.21))
+            shortLeg.geometry?.materials = [shorts]
+            shortLeg.position = SCNVector3(0, -0.075, 0)
+            thigh.addChildNode(shortLeg)
             knee.position = SCNVector3(0, -0.44, 0)
             thigh.addChildNode(knee)
-            let shin = SCNNode(geometry: SCNCapsule(capRadius: 0.052, height: 0.44))
+            let shin = SCNNode(geometry: SCNCapsule(capRadius: 0.045, height: 0.44))
             shin.geometry?.materials = [skin]
             shin.position = SCNVector3(0, -0.20, 0)
             knee.addChildNode(shin)
+            let calf = SCNNode(geometry: SCNCapsule(capRadius: 0.055, height: 0.17))
+            calf.geometry?.materials = [skin]
+            calf.position = SCNVector3(0, -0.115, -0.012)
+            knee.addChildNode(calf)
             ankle.position = SCNVector3(0, -0.43, 0)
             knee.addChildNode(ankle)
-            let foot = SCNNode(geometry: SCNBox(width: 0.095, height: 0.062, length: 0.25, chamferRadius: 0.028))
+            let foot = SCNNode(geometry: SCNBox(width: 0.088, height: 0.052, length: 0.185, chamferRadius: 0.024))
             foot.geometry?.materials = [shoe]
-            foot.position = SCNVector3(0, -0.028, 0.055)
+            foot.position = SCNVector3(0, -0.026, 0.038)
             ankle.addChildNode(foot)
+            let toe = SCNNode(geometry: SCNBox(width: 0.078, height: 0.038, length: 0.085, chamferRadius: 0.018))
+            toe.geometry?.materials = [shoe]
+            toe.position = SCNVector3(0, -0.033, 0.155)
+            toe.eulerAngles = SCNVector3(0.12, 0, 0)
+            ankle.addChildNode(toe)
+            let sole = SCNNode(geometry: SCNBox(width: 0.09, height: 0.014, length: 0.24, chamferRadius: 0.006))
+            sole.geometry?.materials = [Self.material(UIColor(white: 0.92, alpha: 1), roughness: 0.5)]
+            sole.position = SCNVector3(0, -0.055, 0.07)
+            ankle.addChildNode(sole)
         }
-        buildLeg(thighL, kneeL, ankleL, x: -0.105)
-        buildLeg(thighR, kneeR, ankleR, x: 0.105)
+        buildLeg(thighL, kneeL, ankleL, x: -0.10)
+        buildLeg(thighR, kneeR, ankleR, x: 0.10)
     }
 
     private static func material(_ color: UIColor, roughness: CGFloat) -> SCNMaterial {

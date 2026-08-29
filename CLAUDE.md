@@ -57,6 +57,17 @@ tuning; keep `RaceEngine` formulas in sync if retuning.
 - `BRIEF.md` — the POC spec. This is the active document.
 - `ROADMAP.md` — long-term vision. **Not to be implemented.**
 
+## The mechanic (current design)
+
+Hold both sides to crouch into SET → gun fires after a random delay → first movement
+launches (reaction timed; early movement = false start penalty) → alternate L/R taps in
+sync with the on-screen metronome pulses. Three sprint phases by distance: DRIVE
+(0–28m, cadence ramps 3.1→4.3 Hz, generous window, each quality tap adds an impulse),
+MAX VELOCITY (28–82m, 4.4 Hz, tight window), HOLD FORM (82m+, fatigue bites). Rhythm
+quality is shown live on the FORM meter and superlinearly drives effective top speed.
+Final 6m: plant both thumbs to LEAN — a dip timed to land on the line saves up to
+0.03s. Target cadence is distance-based (predictable/learnable), never velocity-based.
+
 ## Product principles (POC)
 
 - Optimize the loop: race → result → immediately race again.

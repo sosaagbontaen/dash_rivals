@@ -10,6 +10,15 @@ enum TapVerdict: String {
     case early = "EARLY"
     case late = "LATE"
     case stumble = "STUMBLE"
+    case lean = "LEAN!"
+}
+
+/// The player's sprint unfolds in three phases (see BRIEF.md's sprint model).
+/// Each has its own target cadence and timing tolerance.
+enum SprintPhaseKind: String {
+    case drive = "DRIVE"
+    case maxVelocity = "MAX VELOCITY"
+    case maintain = "HOLD FORM"
 }
 
 /// Live state of one runner during a race.
@@ -62,14 +71,21 @@ final class RaceEngine {
     // MARK: Tunables (player model)
     struct Tuning {
         var playerTopSpeed = 11.45          // m/s, ceiling with perfect rhythm
-        var accelMax = 9.9                  // m/s^2 at standstill
-        var launchImpulse = 2.5             // m/s granted by first stride off the blocks
+        var accelMax = 9.4                  // m/s^2 at standstill
+        var launchImpulse = 1.9             // m/s granted by first stride off the blocks
+        var driveImpulse = 0.55             // extra m/s per quality drive-phase tap
+        var driveEnd = 28.0                 // meters: end of the drive phase
+        var maxVEnd = 82.0                  // meters: end of max velocity, fatigue zone begins
         var fatigueOnset = 5.8              // seconds of running before fatigue can bite
         var fatigueK = 0.0022               // late-race decay factor
-        var idealFreqStart = 3.5            // taps/sec needed at low speed
-        var idealFreqTop = 4.6              // taps/sec needed at top speed
+        var driveFreqStart = 3.1            // taps/sec at the first drive step
+        var driveFreqEnd = 4.3              // taps/sec at the end of the drive
+        var topFreq = 4.4                   // taps/sec at max velocity
         var coastDecel = 2.8                // m/s^2 bleed when not tapping
         var stumblePenalty = 0.42           // rhythm multiplier on a stumble
+        var leanZone = 94.0                 // meters: both-thumbs lean armed from here
+        var leanBestAt = 98.6               // meters: a dip here lands exactly on the line
+        var leanMaxCredit = 0.03            // seconds saved by a perfectly timed lean
     }
     var tuning = Tuning()
 
@@ -85,6 +101,8 @@ final class RaceEngine {
     private(set) var playerLaunched = false
     private(set) var falseStarted = false
     private var stunUntil: Double = 0
+    private(set) var leanExecutedAt: Double? = nil    // distance where the player dipped
+    private(set) var leanCredit: Double = 0
 
     // Timeline
     private var phaseTime: Double = 0               // seconds inside current phase
@@ -97,10 +115,42 @@ final class RaceEngine {
         guard let last = lastTapSide else { return nil }
         return last == .left ? .right : .left
     }
+
+    /// Current sprint phase, by distance covered.
+    var sprintPhase: SprintPhaseKind {
+        let d = player.distance
+        if d < tuning.driveEnd { return .drive }
+        if d < tuning.maxVEnd { return .maxVelocity }
+        return .maintain
+    }
+
+    /// Target cadence is a function of *distance*, not velocity, so it ramps
+    /// predictably: a rhythm the player can learn and anticipate.
     var playerIdealTapInterval: Double {
-        let v = player.velocity
-        let f = tuning.idealFreqStart + (tuning.idealFreqTop - tuning.idealFreqStart) * min(1, v / tuning.playerTopSpeed)
+        let d = player.distance
+        let f: Double
+        if d < tuning.driveEnd {
+            f = tuning.driveFreqStart + (tuning.driveFreqEnd - tuning.driveFreqStart) * (d / tuning.driveEnd)
+        } else {
+            f = tuning.topFreq
+        }
         return 1.0 / f
+    }
+
+    /// Engine-clock moment of the next ideal tap — the metronome the HUD pulses to.
+    var nextBeatAt: Double? {
+        guard playerLaunched, phase == .racing, player.finishTime == nil else { return nil }
+        return (lastTapTime ?? player.reaction) + playerIdealTapInterval
+    }
+
+    /// Timing tolerance per phase: generous in the drive, tight at top speed,
+    /// slightly loose (but heavily punished by fatigue) at the end.
+    private var deadzone: Double {
+        switch sprintPhase {
+        case .drive: return 0.10
+        case .maxVelocity: return 0.06
+        case .maintain: return 0.07
+        }
     }
 
     // MARK: Race lifecycle
@@ -138,6 +188,8 @@ final class RaceEngine {
         playerLaunched = false
         falseStarted = false
         stunUntil = 0
+        leanExecutedAt = nil
+        leanCredit = 0
         phaseTime = 0
     }
 
@@ -186,6 +238,27 @@ final class RaceEngine {
         }
     }
 
+    /// Both thumbs planted in the final meters: the dip at the line.
+    /// Best executed so the chest drops right on the line; too early bleeds speed.
+    @discardableResult
+    func executeLean() -> TapVerdict? {
+        guard phase == .racing, playerLaunched, player.finishTime == nil,
+              leanExecutedAt == nil, player.distance >= tuning.leanZone else { return nil }
+        let d = player.distance
+        leanExecutedAt = d
+        leanCredit = tuning.leanMaxCredit * max(0, 1 - abs(tuning.leanBestAt - d) / 3.5)
+        player.velocity *= 0.985   // the dip costs a touch of speed — don't go too early
+        return .lean
+    }
+
+    /// Late-race fade; steadier rhythm postpones it.
+    var currentFatigue: Double {
+        let t = timeSinceGun
+        guard t > tuning.fatigueOnset else { return 1.0 }
+        let k = tuning.fatigueK * (1.35 - 0.5 * rhythm)
+        return max(0.90, 1.0 - k * pow(t - tuning.fatigueOnset, 2))
+    }
+
     private func scoreStride(side: TapSide, at engineTime: Double) -> TapVerdict {
         let now = min(timeSinceGun, max(engineTime, (lastTapTime ?? 0) + 0.01))
         let ideal = playerIdealTapInterval
@@ -199,12 +272,19 @@ final class RaceEngine {
             player.velocity *= 0.94
         } else {
             let err = abs(dt - ideal) / ideal
-            // Tight dead zone, steep falloff: execution quality must matter.
-            let q = err < 0.06 ? 1.0 : max(0.05, 1.0 - (err - 0.06) * 2.8)
-            if err < 0.06 { verdict = .perfect }
-            else if err < 0.18 { verdict = .good }
+            // Dead zone + steep falloff: execution quality must matter.
+            let dz = deadzone
+            let q = err < dz ? 1.0 : max(0.05, 1.0 - (err - dz) * 2.8)
+            if err < dz { verdict = .perfect }
+            else if err < dz + 0.12 { verdict = .good }
             else { verdict = dt < ideal ? .early : .late }
             rhythm = rhythm * 0.55 + min(1.0, q) * 0.45
+            // Drive phase: every well-timed tap is a power step off the ground.
+            if sprintPhase == .drive {
+                let fatigue = currentFatigue
+                let vEff = tuning.playerTopSpeed * (0.70 + 0.30 * pow(rhythm, 1.6)) * fatigue
+                player.velocity += tuning.driveImpulse * q * max(0, 1 - player.velocity / vEff)
+            }
         }
         lastTapTime = now
         lastTapSide = side
@@ -263,7 +343,9 @@ final class RaceEngine {
                     if r.athlete.isPlayer { events.playerCrossed50 = true }
                 }
                 if r.distance >= Double(Track.raceLength) {
-                    r.finishTime = clock - (r.distance - Double(Track.raceLength)) / max(0.1, r.velocity)
+                    var t = clock - (r.distance - Double(Track.raceLength)) / max(0.1, r.velocity)
+                    if r.athlete.isPlayer { t -= leanCredit }   // the dip gets the chest there sooner
+                    r.finishTime = t
                     events.runnersJustFinished.append(r)
                 }
             }
@@ -309,17 +391,9 @@ final class RaceEngine {
             rhythm *= exp(-dt * 3.2)
         }
 
-        // Fatigue late in the race; steadier rhythm postpones the fade.
-        var fatigue = 1.0
-        let t = timeSinceGun
-        if t > tuning.fatigueOnset {
-            let k = tuning.fatigueK * (1.35 - 0.5 * rhythm)
-            fatigue = max(0.90, 1.0 - k * pow(t - tuning.fatigueOnset, 2))
-        }
-
         // Wide rhythm band + superlinear response: execution quality separates times.
         let rEff = pow(rhythm, 1.6)
-        let vEff = tuning.playerTopSpeed * (0.70 + 0.30 * rEff) * fatigue
+        let vEff = tuning.playerTopSpeed * (0.70 + 0.30 * rEff) * currentFatigue
         if r.velocity < vEff {
             let drive = tuning.accelMax * (0.10 + 0.90 * rhythm) * max(0, 1 - r.velocity / vEff)
             r.velocity += drive * dt

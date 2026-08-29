@@ -20,6 +20,7 @@ struct PlayerSummary {
     let reaction: Double
     let split50: Double?
     let topSpeed: Double
+    let leanCredit: Double
     let isNewPB: Bool
     let previousPB: Double?
 }
@@ -45,6 +46,12 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     @Published var holdingR = false
     @Published var nextSide: TapSide? = nil
     @Published var bestTimeText = "—"
+    // Metronome: HUD pulses at beatRef + k·beatInterval, alternating sides.
+    @Published var beatRef: Date? = nil
+    @Published var beatInterval: Double = 0.3
+    @Published var beatNextIsRight = false
+    @Published var formValue: Double = 0        // rhythm 0..1, drives the FORM meter
+    @Published var phaseLabel: String? = nil    // DRIVE / MAX VELOCITY / HOLD FORM
 
     // MARK: Scene
     let scene = SCNScene()
@@ -73,6 +80,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     private let inputLock = NSLock()
     private var pendingInputs: [(side: TapSide, isDown: Bool, hostTime: Double)] = []
     private var heldSides: Set<Bool> = []   // true = right
+    private var sideDownAt: [Bool: Double] = [:]   // engine time each side last went down
+    private var playerLeanUntil: Double = 0        // scene time: dip pose held until then
 
     // Haptics
     private let tapHaptic = UIImpactFeedbackGenerator(style: .light)
@@ -264,9 +273,25 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             case .racing:
                 if !engine.playerLaunched {
                     // First movement after the gun launches the sprint (up or down).
-                    if let v = engine.playerTap(side: side, engineTime: engineT) { flashVerdict(v) }
+                    if let v = engine.playerTap(side: side, engineTime: engineT) {
+                        flashVerdict(v)
+                        publishBeat()
+                    }
                 } else if isDown {
-                    if let v = engine.playerTap(side: side, engineTime: engineT) { flashVerdict(v) }
+                    // Both thumbs planted in the final meters = the lean.
+                    let opposite = side == .left
+                    let oppositeHeldLong = heldSides.contains(opposite)
+                        && (engineT - (sideDownAt[opposite] ?? -1)) > 0.12
+                    if oppositeHeldLong, engine.player.distance >= engine.tuning.leanZone,
+                       let v = engine.executeLean() {
+                        flashVerdict(v)
+                        playerLeanUntil = sceneTime + 0.55
+                        DispatchQueue.main.async { self.heavyHaptic.impactOccurred() }
+                    } else if let v = engine.playerTap(side: side, engineTime: engineT) {
+                        flashVerdict(v)
+                        publishBeat()
+                    }
+                    sideDownAt[side == .right] = engineT
                 }
             default:
                 break
@@ -274,8 +299,22 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         }
     }
 
+    /// Re-anchor the HUD metronome after each scored tap.
+    private func publishBeat() {
+        guard let beatAt = engine.nextBeatAt else { return }
+        let delta = beatAt - engine.timeSinceGun
+        let ref = Date(timeIntervalSinceNow: delta)
+        let interval = engine.playerIdealTapInterval
+        let nextRight = engine.expectedNextSide == .right
+        publish {
+            $0.beatRef = ref
+            $0.beatInterval = interval
+            $0.beatNextIsRight = nextRight
+        }
+    }
+
     private func flashVerdict(_ v: TapVerdict) {
-        let good = v == .perfect || v == .good
+        let good = v == .perfect || v == .good || v == .lean
         switch v {
         case .perfect, .good:
             DispatchQueue.main.async { self.tapHaptic.impactOccurred(intensity: v == .perfect ? 1.0 : 0.6) }
@@ -375,6 +414,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                                 reaction: engine.player.reaction,
                                 split50: engine.player.split50,
                                 topSpeed: engine.player.topSpeed,
+                                leanCredit: engine.leanCredit,
                                 isNewPB: isNewPB,
                                 previousPB: prevPB)
 
@@ -452,12 +492,17 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 if engine.timeSinceGun > 0.14 {
                     _ = engine.playerTap(side: autoSide, engineTime: 0.14)
                     scheduleNextAutoTap()
+                    publishBeat()
                 }
+            } else if engine.player.distance > 98.2, engine.leanExecutedAt == nil,
+                      engine.player.finishTime == nil {
+                _ = engine.executeLean()
             } else if engine.timeSinceGun >= nextAutoTap {
                 autoSide = autoSide == .left ? .right : .left
                 // Score the tap at its intended moment, not the frame boundary.
                 _ = engine.playerTap(side: autoSide, engineTime: nextAutoTap)
                 scheduleNextAutoTap()
+                publishBeat()
             }
         case .results:
             if !autopilotOnce, phaseTime > 6 { publish { $0.runAgain() }; phaseTime = 0 }
@@ -500,7 +545,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             }
 
             // Acceleration lean: deep at launch, upright at speed.
-            let lean = max(0.06, 0.58 * (1 - r.velocity / 11.5))
+            var lean = max(0.06, 0.58 * (1 - r.velocity / 11.5))
+            // The dip at the line.
+            if r.athlete.isPlayer, sceneTime < playerLeanUntil { lean = 0.85 }
             fig.update(phase: r.stridePhase, speed: r.velocity, lean: r.velocity > 0.2 ? lean : 0.1,
                        time: sceneTime)
 
@@ -551,15 +598,19 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             let speedStr = String(format: "%.1f", engine.player.velocity)
             let promptStr = currentPrompt()
             let next = nextExpectedSide()
-            if promptStr != lastPrompt || true {
-                lastPrompt = promptStr
-                publish {
-                    $0.clockText = clockStr
-                    $0.speedText = speedStr
-                    if $0.prompt != promptStr { $0.prompt = promptStr }
-                    if $0.nextSide != next { $0.nextSide = next }
-                }
+            let form = engine.rhythm
+            let racing = engine.phase == .racing && engine.playerLaunched
+            let phaseStr: String? = racing ? engine.sprintPhase.rawValue : nil
+            publish {
+                $0.clockText = clockStr
+                $0.speedText = speedStr
+                $0.formValue = form
+                if $0.prompt != promptStr { $0.prompt = promptStr }
+                if $0.nextSide != next { $0.nextSide = next }
+                if $0.phaseLabel != phaseStr { $0.phaseLabel = phaseStr }
+                if !racing, $0.beatRef != nil { $0.beatRef = nil }
             }
+            lastPrompt = promptStr
         }
 
         mapAccum += dt
@@ -579,7 +630,11 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         case .set: return "SET…"
         case .racing:
             if !engine.playerLaunched { return "GO! TAP!" }
-            return engine.timeSinceGun < 2.5 ? "ALTERNATE TAPS — FIND THE RHYTHM" : nil
+            if engine.player.finishTime == nil, engine.player.distance > 88,
+               engine.leanExecutedAt == nil {
+                return "LEAN — PLANT BOTH THUMBS"
+            }
+            return engine.timeSinceGun < 2.0 ? "TAP WITH THE PULSE" : nil
         default: return nil
         }
     }
