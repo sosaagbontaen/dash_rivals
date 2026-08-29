@@ -38,7 +38,9 @@ final class GameAudio {
         tick = Synth.tone(freq: 1250, seconds: 0.06, attack: 0.002, decay: 28, gain: 0.18, format: format)
         pbJingle = Synth.jingle(format: format)
         heartbeat = Synth.heartbeat(format: format)
-        breaths = (0..<3).map { i in Synth.breath(pitch: 0.9 + Float(i) * 0.12, format: format) }
+        breaths = [Synth.breath(pitch: 0.95, grunt: false, format: format),
+                   Synth.breath(pitch: 1.12, grunt: false, format: format),
+                   Synth.breath(pitch: 1.0, grunt: true, format: format)]
 
         // .playback so game audio plays even with the ringer/silent switch on
         // (.ambient goes silent on a muted phone — the simulator ignores the switch,
@@ -294,23 +296,40 @@ private enum Synth {
         return buf
     }
 
-    /// One hard exhale — breathy noise through a mouth-ish resonance.
-    static func breath(pitch: Float, format: AVAudioFormat) -> AVAudioPCMBuffer {
-        let buf = buffer(seconds: 0.34, format: format)
+    /// One hard exhale. Breath is turbulence, not tone: broadband noise with a
+    /// closing-mouth brightness sweep and *wide* (non-ringing) formants. The grunt
+    /// variant adds a short voiced "uh" — a damped, pitch-dropping buzz underneath.
+    static func breath(pitch: Float, grunt: Bool, format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let buf = buffer(seconds: 0.42, format: format)
         let sr = Float(format.sampleRate)
-        var y1: Float = 0, y2: Float = 0
-        let w = 2 * .pi * 1150 * pitch / sr
-        let rr: Float = 0.965
+        var f1: (Float, Float) = (0, 0)
+        var f2: (Float, Float) = (0, 0)
+        let r1: Float = 0.88   // wide bandwidth: shapes, never rings
+        let r2: Float = 0.85
+        let w1 = 2 * .pi * 520 * pitch / sr
+        let w2 = 2 * .pi * 1400 * pitch / sr
         var lp: Float = 0
+        var vPhase: Float = 0
         fill(buf) { i, _ in
             let t = Float(i) / sr
             let white = Float.random(in: -1...1)
-            let y = 2 * rr * cos(w) * y1 - rr * rr * y2 + white * 0.06
-            y2 = y1; y1 = y
-            lp += 0.22 * (white - lp)
-            // Sharp huff: fast attack, breathy tail.
-            let env = min(1, t / 0.03) * exp(-max(0, t - 0.05) * 11)
-            return (y * 1.6 + lp * 0.5) * env * 0.8
+            // Mouth opens then closes: lowpass cutoff sweeps bright -> dull.
+            let cut = 0.10 + 0.26 * exp(-t * 7)
+            lp += cut * (white - lp)
+            let y1n = 2 * r1 * cos(w1) * f1.0 - r1 * r1 * f1.1 + lp * 0.35
+            f1 = (y1n, f1.0)
+            let y2n = 2 * r2 * cos(w2) * f2.0 - r2 * r2 * f2.1 + white * 0.10
+            f2 = (y2n, f2.0)
+            let env = min(1, t / 0.05) * exp(-max(0, t - 0.10) * 8)
+            var s = (lp * 1.2 + y1n * 0.9 + y2n * 0.45) * env
+            if grunt {
+                // Voiced "uh": pitch falls 132 -> 90 Hz, dies fast, roughened by the noise.
+                let f0 = 132 - 42 * min(1, t / 0.14)
+                vPhase += 2 * .pi * f0 / sr
+                let voiced = sin(vPhase) * exp(-t * 9) * (0.7 + 0.3 * lp)
+                s += voiced * 0.55 * min(1, t / 0.02)
+            }
+            return s * 0.85
         }
         return buf
     }
