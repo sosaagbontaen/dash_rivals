@@ -60,6 +60,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     @Published var leanCue = false
     @Published var effortL: Double = 0.85
     @Published var effortR: Double = 0.85
+    @Published var stickAngleL: Double = -1.2   // radians; knob rendering
+    @Published var stickAngleR: Double = -1.9
     // Broadcast replay
     @Published var replayActive = false
     @Published var windText = "+0.0"
@@ -259,12 +261,15 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         inputLock.unlock()
     }
 
-    /// Continuous per-thumb effort, 0 (inner) .. 1 (outer edge).
-    func effortInput(side: TapSide, value: Double) {
+    /// Continuous per-thumb effort (0 inner .. 1 outer) + the thumb's angle on
+    /// its stick, so the HUD can draw the knob exactly under the thumb.
+    func effortInput(side: TapSide, value: Double, angle: Double) {
         inputLock.lock()
         latestEffort[side == .right] = value
+        latestAngle[side == .right] = angle
         inputLock.unlock()
     }
+    private var latestAngle: [Bool: Double] = [:]
 
     /// Downward touch motion in points; a sharp drop in the final meters = the dip.
     func dipInput(points: Double) {
@@ -381,9 +386,17 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         pendingInputs.removeAll()
         let effL = latestEffort[false]
         let effR = latestEffort[true]
+        let angL = latestAngle[false]
+        let angR = latestAngle[true]
         let dip = pendingDip
         pendingDip = 0
         inputLock.unlock()
+        if angL != nil || angR != nil {
+            publish {
+                if let a = angL { $0.stickAngleL = a }
+                if let a = angR { $0.stickAngleR = a }
+            }
+        }
 
         // Dip detector: fast downward swipe in the final meters.
         dipAccum = dipAccum * 0.86 + dip

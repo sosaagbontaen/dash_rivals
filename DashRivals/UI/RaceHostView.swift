@@ -39,24 +39,28 @@ final class TouchSCNView: SCNView {
         return CGPoint(x: x, y: bounds.height - 109)
     }
 
-    private func effort(of touch: UITouch) -> Double {
+    /// Effort = radial deflection; angle lets the HUD draw the knob under the thumb.
+    /// Must mirror EffortGauge.r(): deadR 9, usable 82 (size 190).
+    private func stickState(of touch: UITouch) -> (effort: Double, angle: Double) {
         let p = touch.location(in: self)
         let o = stickOrigin(for: side(of: touch))
-        let d = hypot(p.x - o.x, p.y - o.y)
-        // Must mirror EffortGauge.r(): deadR 9, usable 82 (size 190).
-        return Double(max(0, min(1, (d - 9) / 82)))
+        let dx = p.x - o.x, dy = p.y - o.y
+        let d = hypot(dx, dy)
+        return (Double(max(0, min(1, (d - 9) / 82))), Double(atan2(dy, dx)))
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for t in touches {
             gameController?.touch(side: side(of: t), isDown: true, hostTime: t.timestamp)
-            gameController?.effortInput(side: side(of: t), value: effort(of: t))
+            let s = stickState(of: t)
+            gameController?.effortInput(side: side(of: t), value: s.effort, angle: s.angle)
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         for t in touches {
-            gameController?.effortInput(side: side(of: t), value: effort(of: t))
+            let s = stickState(of: t)
+            gameController?.effortInput(side: side(of: t), value: s.effort, angle: s.angle)
             // Downward motion feeds the dip detector (the lean at the line).
             let dy = t.location(in: self).y - t.previousLocation(in: self).y
             if dy > 0 { gameController?.dipInput(points: Double(dy)) }

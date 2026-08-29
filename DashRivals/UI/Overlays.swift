@@ -310,12 +310,14 @@ struct RaceHUD: View {
                     Spacer()
                     HStack {
                         EffortGauge(effort: game.effortL,
+                                    angle: game.stickAngleL,
                                     bandCenter: game.bandCenter,
                                     bandHalf: game.bandHalf,
                                     tension: game.tensionValue)
                             .padding(.leading, 14)
                         Spacer()
                         EffortGauge(effort: game.effortR,
+                                    angle: game.stickAngleR,
                                     bandCenter: game.bandCenter,
                                     bandHalf: game.bandHalf,
                                     tension: game.tensionValue)
@@ -331,12 +333,13 @@ struct RaceHUD: View {
     }
 }
 
-/// Joystick effort gauge: push your thumb out from the stick to raise effort.
-/// The gold annulus is the moving target; your deflection ring rides under your
-/// thumb (the touch mapping is 1:1 with this geometry). Ring turns white-in-band,
-/// red when you're off it; red rim = tension building.
+/// Joystick effort gauge — the linear band bent into a circle. The fat gold
+/// donut is the moving target area; the white knob sits exactly under your
+/// thumb (touch mapping is 1:1 with this geometry). Keep the knob in the gold.
+/// Knob turns red the moment it leaves the band; red rim = tension building.
 struct EffortGauge: View {
     let effort: Double
+    let angle: Double        // radians, thumb's direction on the stick
     let bandCenter: Double
     let bandHalf: Double
     let tension: Double
@@ -363,22 +366,24 @@ struct EffortGauge: View {
                                           lineWidth: tension > 0.4 ? 2.5 : 1)
                 )
             Circle().fill(Color.white.opacity(0.25)).frame(width: 8, height: 8)
-            // Target band: a gold annulus — put your thumb inside it.
+            // Target area: a filled gold donut — keep the knob inside it.
             Circle()
-                .stroke(Style.gold.opacity(inBand ? 0.5 : 0.38),
-                        lineWidth: max(9, (r(bandCenter + bandHalf) - r(bandCenter - bandHalf))))
+                .stroke(Style.gold.opacity(inBand ? 0.55 : 0.42),
+                        lineWidth: max(10, (r(bandCenter + bandHalf) - r(bandCenter - bandHalf))))
                 .frame(width: r(bandCenter) * 2, height: r(bandCenter) * 2)
             Circle()
-                .stroke(Style.gold.opacity(0.9), lineWidth: 1.4)
+                .stroke(Style.gold.opacity(0.95), lineWidth: 1.4)
                 .frame(width: r(bandCenter + bandHalf) * 2, height: r(bandCenter + bandHalf) * 2)
             Circle()
-                .stroke(Style.gold.opacity(0.9), lineWidth: 1.4)
+                .stroke(Style.gold.opacity(0.95), lineWidth: 1.4)
                 .frame(width: r(bandCenter - bandHalf) * 2, height: r(bandCenter - bandHalf) * 2)
-            // Thumb deflection ring — white on target, red off it.
+            // The knob: your thumb. White in the band, red off it.
             Circle()
-                .stroke(inBand ? Color.white : Style.bad, lineWidth: 3.5)
+                .fill(inBand ? Color.white : Style.bad)
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.35), lineWidth: 1))
+                .frame(width: 26, height: 26)
                 .shadow(color: .black.opacity(0.7), radius: 3)
-                .frame(width: r(effort) * 2, height: r(effort) * 2)
+                .offset(x: cos(angle) * r(effort), y: sin(angle) * r(effort))
         }
         .frame(width: size, height: size)
         .animation(.linear(duration: 0.08), value: effort)
