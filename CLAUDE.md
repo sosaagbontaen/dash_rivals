@@ -66,12 +66,11 @@ binary even though `xcodebuild` reports success. Build with an explicit
 
 Shared: hold both sides to crouch into SET → gun after a random delay → first movement
 launches (reaction timed; moving before the gun = false start penalty). Both thumbs
-then ride twin **joystick gauges** at the bottom corners: push out from the stick =
-more effort (radial), keep your white deflection ring inside the gold target ring.
-The target follows a real sprint's arc: high through the DRIVE, a sharp *relax* drop
-into MAX VELOCITY (relax to run fast), then it sinks and wobbles through HOLD ON
-(80m+) — chasing it down smoothly is "decelerating slowest". Fixed "breathe" dips at
-40/64/86m reward race knowledge; pushing past the band builds tension → extra
+then chase a **filled yellow dot** that wanders each bottom-corner joystick pad in 2D —
+its radius follows the sprint arc (pushed far out through the DRIVE, a sharp *relax*
+drop into MAX VELOCITY, sinking + wandering harder through HOLD ON at 80m+), and the
+white knob is drawn 1:1 under the thumb. Closer to the dot's center = faster (the
+drawn dot IS the scoring tolerance); pushing out past it builds tension → extra
 deceleration; tracking quality (qBar → FORM meter) superlinearly drives sustainable
 speed; thumbs drifting apart costs form. Final 6m: **swipe both thumbs DOWN** to dip
 at the line (up to 0.03s; "DIP!" chevron cue at 88m).
