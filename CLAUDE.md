@@ -62,22 +62,29 @@ binary even though `xcodebuild` reports success. Build with an explicit
 - `BRIEF.md` — the POC spec. This is the active document.
 - `ROADMAP.md` — long-term vision. **Not to be implemented.**
 
-## The mechanic (current design: effort-band riding — no tapping)
+## The mechanics (A/B toggle on the menu: BAND / MOMENTS)
 
-Hold both sides to crouch into SET → gun fires after a random delay → **lift a thumb**
-(reaction timed; any movement before the gun = false start penalty) → the remaining
-thumb slides vertically, riding a choreographed **effort band** on the right-edge gauge
-(white bar = thumb, gold band = target). The band follows a real sprint's arc: high
-through the DRIVE (0–30m), a sharp *relax* drop into MAX VELOCITY (the sprinting
-paradox: relax to run fast), then it sinks and wobbles through HOLD ON (80m+) — chasing
-it down smoothly is "decelerating slowest". Three fixed "breathe" dips at 40/64/86m
-reward race knowledge. Riding **above** the band builds tension → extra deceleration
-(tighten up = slow down; "RELAX" flash at tension 0.55). Tracking quality (qBar, shown
-as FORM) superlinearly drives sustainable speed. Final 6m: plant the second thumb to
-LEAN — a dip timed to land on the line saves up to 0.03s.
+Shared: hold both sides to crouch into SET → gun after a random delay → first movement
+launches (reaction timed; moving before the gun = false start penalty). Both thumbs
+then ride twin **joystick gauges** at the bottom corners: push out from the stick =
+more effort (radial), keep your white deflection ring inside the gold target ring.
+The target follows a real sprint's arc: high through the DRIVE, a sharp *relax* drop
+into MAX VELOCITY (relax to run fast), then it sinks and wobbles through HOLD ON
+(80m+) — chasing it down smoothly is "decelerating slowest". Fixed "breathe" dips at
+40/64/86m reward race knowledge; pushing past the band builds tension → extra
+deceleration; tracking quality (qBar → FORM meter) superlinearly drives sustainable
+speed; thumbs drifting apart costs form. Final 6m: **swipe both thumbs DOWN** to dip
+at the line (up to 0.03s; "DIP!" chevron cue at 88m).
 
-Skill curve (validated headlessly, see scratchpad tune6.swift): perfect ≈ 9.86,
-great ≈ 9.95, good ≈ 10.1, average ≈ 10.7, chaotic ≈ 12.2 vs the AI field's 9.96–10.4.
+- **BAND**: band-riding the whole race.
+- **MOMENTS**: 0–30m is a mash — every tap a power step; intensity fills a BURN meter
+  (sweet spot ~55%) that you pay for after 80m — then the sticks take over at 30m.
+
+Skill curves validated headlessly (scratchpad tune6/tune7.swift): band — perfect
+≈ 9.86 … chaotic ≈ 12.2; moments — optimal-rev ≈ 9.94, masher ≈ 10.1, lazy ≈ 10.3.
+AI field runs 9.96–10.4. Cinematic beats: gun impact-freeze, FULL FLIGHT FOV bloom +
+letterbox bars past 30m, super-slow-mo final meters, then a trackside long-lens
+broadcast REPLAY (tap to skip) into results (photo-finish stamp, wind reading).
 
 ## Product principles (POC)
 

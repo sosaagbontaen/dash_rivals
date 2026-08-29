@@ -303,8 +303,8 @@ struct RaceHUD: View {
                     .offset(y: -20)
             }
 
-            // Twin horizontal effort gauges along the bottom corners — one per thumb,
-            // mirrored so sweeping outward is always more effort.
+            // Twin joystick gauges at the bottom corners — hold the white ring
+            // (your thumb's push distance) inside the gold target ring.
             if game.gaugeVisible {
                 VStack {
                     Spacer()
@@ -313,16 +313,15 @@ struct RaceHUD: View {
                                     bandCenter: game.bandCenter,
                                     bandHalf: game.bandHalf,
                                     tension: game.tensionValue)
-                            .scaleEffect(x: -1, y: 1)   // left thumb: outward = leftward
-                            .padding(.leading, 16)
+                            .padding(.leading, 14)
                         Spacer()
                         EffortGauge(effort: game.effortR,
                                     bandCenter: game.bandCenter,
                                     bandHalf: game.bandHalf,
                                     tension: game.tensionValue)
-                            .padding(.trailing, 16)
+                            .padding(.trailing, 14)
                     }
-                    .padding(.bottom, 5)
+                    .padding(.bottom, 14)
                 }
             }
         }
@@ -332,48 +331,51 @@ struct RaceHUD: View {
     }
 }
 
-/// Horizontal effort gauge: the gold band is the target; the white bar is your thumb.
-/// Red creep means tension — you're pushing past the band and tightening up.
-/// Rendered left-to-right = inner-to-outer; the left instance is x-flipped.
+/// Joystick effort gauge: push your thumb out from the stick to raise effort.
+/// The gold ring is the target radius; the white ring is your thumb's deflection.
+/// Red rim means tension — you're pushing past the band and tightening up.
 struct EffortGauge: View {
     let effort: Double
     let bandCenter: Double
     let bandHalf: Double
     let tension: Double
 
-    private let width: CGFloat = 300
-    private let height: CGFloat = 30
+    private let size: CGFloat = 130
+    private let deadR: CGFloat = 9
 
-    private func x(_ value: Double) -> CGFloat {
-        width * CGFloat(min(1, max(0, value)))
+    private func r(_ value: Double) -> CGFloat {
+        deadR + (size / 2 - 4 - deadR) * CGFloat(min(1, max(0, value)))
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            // Track
-            RoundedRectangle(cornerRadius: 11)
-                .fill(Color.black.opacity(0.45))
+        ZStack {
+            // Stick base
+            Circle()
+                .fill(Color.black.opacity(0.42))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11)
-                        .strokeBorder(tension > 0.4 ? Style.bad.opacity(0.3 + 0.6 * tension)
-                                                    : Color.white.opacity(0.18),
-                                      lineWidth: tension > 0.4 ? 2.5 : 1)
+                    Circle().strokeBorder(tension > 0.4 ? Style.bad.opacity(0.3 + 0.6 * tension)
+                                                        : Color.white.opacity(0.16),
+                                          lineWidth: tension > 0.4 ? 2.5 : 1)
                 )
-            // Target band
-            RoundedRectangle(cornerRadius: 7)
-                .fill(Style.gold.opacity(0.38))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Style.gold.opacity(0.85), lineWidth: 1.5))
-                .frame(width: max(12, width * CGFloat(bandHalf * 2)), height: height - 8)
-                .offset(x: x(bandCenter - bandHalf), y: 0)
-                .padding(.vertical, 4)
-            // Thumb marker
-            Capsule()
-                .fill(.white)
-                .frame(width: 5, height: height + 10)
+            Circle().fill(Color.white.opacity(0.25)).frame(width: 7, height: 7)
+            // Target ring: the band as an annulus
+            Circle()
+                .stroke(Style.gold.opacity(0.42),
+                        lineWidth: max(7, (r(bandCenter + bandHalf) - r(bandCenter - bandHalf))))
+                .frame(width: r(bandCenter) * 2, height: r(bandCenter) * 2)
+            Circle()
+                .stroke(Style.gold.opacity(0.9), lineWidth: 1.2)
+                .frame(width: r(bandCenter + bandHalf) * 2, height: r(bandCenter + bandHalf) * 2)
+            Circle()
+                .stroke(Style.gold.opacity(0.9), lineWidth: 1.2)
+                .frame(width: r(bandCenter - bandHalf) * 2, height: r(bandCenter - bandHalf) * 2)
+            // Thumb deflection ring
+            Circle()
+                .stroke(.white, lineWidth: 3)
                 .shadow(color: .black.opacity(0.7), radius: 3)
-                .offset(x: x(effort) - 2.5, y: 0)
+                .frame(width: r(effort) * 2, height: r(effort) * 2)
         }
-        .frame(width: width, height: height)
+        .frame(width: size, height: size)
         .animation(.linear(duration: 0.08), value: effort)
         .animation(.linear(duration: 0.08), value: bandCenter)
     }

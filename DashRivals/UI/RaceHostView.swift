@@ -31,15 +31,18 @@ final class TouchSCNView: SCNView {
         touch.location(in: self).x < bounds.midX ? .left : .right
     }
 
-    /// Horizontal thumb position → effort 0..1, mirrored per side so
-    /// sweeping OUTWARD (toward your side's edge) is always more effort.
+    /// Joystick effort: radial distance of the thumb from its side's stick origin
+    /// (bottom corners, matching the on-screen joystick widgets). Push out = more.
+    private func stickOrigin(for side: TapSide) -> CGPoint {
+        let x: CGFloat = side == .left ? 79 : bounds.width - 79
+        return CGPoint(x: x, y: bounds.height - 79)
+    }
+
     private func effort(of touch: UITouch) -> Double {
-        let x = touch.location(in: self).x
-        let half = bounds.width / 2
-        let fromCenter = abs(x - half)
-        let inner = half * 0.06
-        let usable = half * 0.86
-        return Double(max(0, min(1, (fromCenter - inner) / usable)))
+        let p = touch.location(in: self)
+        let o = stickOrigin(for: side(of: touch))
+        let d = hypot(p.x - o.x, p.y - o.y)
+        return Double(max(0, min(1, (d - 12) / 120)))
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
