@@ -125,7 +125,7 @@ struct MarksSetOverlay: View {
                     Text("SET…")
                         .font(Style.headline(44)).foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.8), radius: 8)
-                    Text("EXPLODE ON THE GUN")
+                    Text("GUN: LIFT A THUMB — THEN RIDE THE BAR")
                         .font(.system(size: 13, weight: .bold)).foregroundStyle(.white.opacity(0.6))
                 } else {
                     Text("HOLD BOTH SIDES")
@@ -241,16 +241,66 @@ struct RaceHUD: View {
                     .padding(.bottom, 16)
             }
 
-            // Metronome cues: pulse ON the beat — tap in sync with them.
-            if game.beatRef != nil {
-                MetronomeCues(beatRef: game.beatRef, interval: game.beatInterval,
-                              nextIsRight: game.beatNextIsRight)
-                    .padding(.horizontal, 10)
+            // Effort gauge: your thumb rides the gold band.
+            if game.gaugeVisible {
+                HStack {
+                    Spacer()
+                    EffortGauge(effort: game.effortValue,
+                                bandCenter: game.bandCenter,
+                                bandHalf: game.bandHalf,
+                                tension: game.tensionValue)
+                        .padding(.trailing, 14)
+                }
             }
         }
         .animation(.spring(duration: 0.3), value: game.splitToast)
         .animation(.easeOut(duration: 0.2), value: game.verdictFlash)
         .allowsHitTesting(false)
+    }
+}
+
+/// Vertical effort gauge: the gold band is the target; the white bar is your thumb.
+/// Red creep means tension — you're pressing above the band and tightening up.
+struct EffortGauge: View {
+    let effort: Double
+    let bandCenter: Double
+    let bandHalf: Double
+    let tension: Double
+
+    private let height: CGFloat = 300
+    private let width: CGFloat = 34
+
+    private func y(_ value: Double) -> CGFloat {
+        height * CGFloat(1 - min(1, max(0, value)))
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            // Track
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(0.45))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(tension > 0.4 ? Style.bad.opacity(0.3 + 0.6 * tension)
+                                                    : Color.white.opacity(0.18),
+                                      lineWidth: tension > 0.4 ? 2.5 : 1)
+                )
+            // Target band
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Style.gold.opacity(0.38))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Style.gold.opacity(0.85), lineWidth: 1.5))
+                .frame(width: width - 8, height: max(12, height * CGFloat(bandHalf * 2)))
+                .offset(x: 4, y: y(bandCenter + bandHalf))
+            // Thumb marker
+            Capsule()
+                .fill(.white)
+                .frame(width: width + 10, height: 5)
+                .shadow(color: .black.opacity(0.7), radius: 3)
+                .offset(x: -5, y: y(effort) - 2.5)
+        }
+        .frame(width: width, height: height)
+        .animation(.linear(duration: 0.08), value: effort)
+        .animation(.linear(duration: 0.08), value: bandCenter)
     }
 }
 
@@ -281,56 +331,6 @@ struct FormMeter: View {
     }
 }
 
-/// Predictive tap cues: rings contract toward each side's next beat and flash on it.
-/// Anchored to the player's own last tap, so it teaches interval, not reaction.
-struct MetronomeCues: View {
-    let beatRef: Date?
-    let interval: Double
-    let nextIsRight: Bool
-
-    var body: some View {
-        TimelineView(.animation) { ctx in
-            HStack {
-                cue(side: false, at: ctx.date)
-                Spacer()
-                cue(side: true, at: ctx.date)
-            }
-        }
-    }
-
-    /// side: false = left, true = right
-    private func cue(side: Bool, at now: Date) -> some View {
-        var flash: Double = 0     // 1 at the beat instant, decays over ~0.16s
-        var approach: Double = 0  // 0 far from this side's beat → 1 at the beat
-        if let ref = beatRef, interval > 0.05 {
-            let t = now.timeIntervalSince(ref)
-            let k = floor(t / interval)
-            let sinceBeat = t - k * interval
-            // Beat index 0 (at ref) belongs to `nextIsRight`; sides alternate.
-            let parity = ((Int(k) % 2) + 2) % 2
-            let beatIsRight = parity == 0 ? nextIsRight : !nextIsRight
-            if beatIsRight == side {
-                flash = max(0, 1 - sinceBeat / 0.16)
-            } else {
-                // This side owns the NEXT beat: contract toward it.
-                approach = sinceBeat / interval
-            }
-        }
-        return ZStack {
-            Circle()
-                .strokeBorder(Style.gold.opacity(0.25 + 0.5 * approach), lineWidth: 2)
-                .frame(width: 54 + 34 * (1 - approach), height: 54 + 34 * (1 - approach))
-                .opacity(approach > 0 ? 1 : 0)
-            Circle()
-                .fill(Style.gold.opacity(0.45 * flash))
-                .overlay(Circle().strokeBorder(Style.gold.opacity(0.3 + 0.7 * flash), lineWidth: 2.5))
-                .overlay(Text("TAP").font(.system(size: 11, weight: .heavy))
-                    .foregroundStyle(Style.gold.opacity(0.45 + 0.55 * flash)))
-                .frame(width: 54, height: 54)
-        }
-        .frame(width: 92, height: 92)
-    }
-}
 
 /// Mini race-progress strip: 8 dots moving left→right.
 struct ProgressStrip: View {

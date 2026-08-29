@@ -31,8 +31,21 @@ final class TouchSCNView: SCNView {
         touch.location(in: self).x < bounds.midX ? .left : .right
     }
 
+    /// Vertical thumb position → effort 0..1 (comfortable margins top/bottom).
+    private func effort(of touch: UITouch) -> Double {
+        let y = touch.location(in: self).y
+        let top = bounds.height * 0.08
+        let usable = bounds.height * 0.80
+        return Double(max(0, min(1, 1 - (y - top) / usable)))
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for t in touches { gameController?.touch(side: side(of: t), isDown: true, hostTime: t.timestamp) }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // The riding thumb: its vertical position is the effort input.
+        if let t = touches.first { gameController?.effortInput(effort(of: t)) }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {

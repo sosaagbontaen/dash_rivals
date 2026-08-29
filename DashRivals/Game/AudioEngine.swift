@@ -31,7 +31,10 @@ final class GameAudio {
         pbJingle = Synth.jingle(format: format)
         heartbeat = Synth.heartbeat(format: format)
 
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+        // .playback so game audio plays even with the ringer/silent switch on
+        // (.ambient goes silent on a muted phone — the simulator ignores the switch,
+        // which is why it sounded fine there).
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
 
         engine.attach(crowdPlayer)

@@ -40,14 +40,19 @@ Launch args (DEBUG-relevant, parsed in `GameController`):
 xcrun simctl launch booted com.dashrivals.poc -autopilot -apq 0.9
 ```
 
-- `-autopilot` — the game plays itself: starts races, holds SET, taps with human-like
-  timing noise, and re-runs after results.
-- `-apq <0..1>` — autopilot tap quality (timing sd = 0.02 + (1-q)·0.25). Rough finish
-  times: q=1.0 → ~9.75, 0.9 → ~9.9, 0.8 → ~10.1, 0.7 → ~10.3, 0.5 → ~11.0.
+- `-autopilot` — the game plays itself: starts races, holds SET, tracks the effort
+  band with human-like lag/noise/over-press bias, leans at the line, re-runs after
+  results.
+- `-apq <0..1>` — autopilot tracking quality (lag 0.06+(1-q)·0.5s, noise sd
+  0.008+(1-q)·0.15, over-press bias (1-q)·0.12). q=0.85 finishes ≈ 10.0–10.1.
 - `-aponce` — stop after one race and hold on the results screen.
 
-`scratchpad tune2.swift` (session scratchpad) mirrors the player model for headless
+A `tune*.swift` script in the session scratchpad mirrors the player model for headless
 tuning; keep `RaceEngine` formulas in sync if retuning.
+
+Build gotcha: if Xcode has the project open, the shared DerivedData can serve a stale
+binary even though `xcodebuild` reports success. Build with an explicit
+`-derivedDataPath` and install that .app when testing from the CLI.
 
 ## Layout
 
@@ -57,16 +62,22 @@ tuning; keep `RaceEngine` formulas in sync if retuning.
 - `BRIEF.md` — the POC spec. This is the active document.
 - `ROADMAP.md` — long-term vision. **Not to be implemented.**
 
-## The mechanic (current design)
+## The mechanic (current design: effort-band riding — no tapping)
 
-Hold both sides to crouch into SET → gun fires after a random delay → first movement
-launches (reaction timed; early movement = false start penalty) → alternate L/R taps in
-sync with the on-screen metronome pulses. Three sprint phases by distance: DRIVE
-(0–28m, cadence ramps 3.1→4.3 Hz, generous window, each quality tap adds an impulse),
-MAX VELOCITY (28–82m, 4.4 Hz, tight window), HOLD FORM (82m+, fatigue bites). Rhythm
-quality is shown live on the FORM meter and superlinearly drives effective top speed.
-Final 6m: plant both thumbs to LEAN — a dip timed to land on the line saves up to
-0.03s. Target cadence is distance-based (predictable/learnable), never velocity-based.
+Hold both sides to crouch into SET → gun fires after a random delay → **lift a thumb**
+(reaction timed; any movement before the gun = false start penalty) → the remaining
+thumb slides vertically, riding a choreographed **effort band** on the right-edge gauge
+(white bar = thumb, gold band = target). The band follows a real sprint's arc: high
+through the DRIVE (0–30m), a sharp *relax* drop into MAX VELOCITY (the sprinting
+paradox: relax to run fast), then it sinks and wobbles through HOLD ON (80m+) — chasing
+it down smoothly is "decelerating slowest". Three fixed "breathe" dips at 40/64/86m
+reward race knowledge. Riding **above** the band builds tension → extra deceleration
+(tighten up = slow down; "RELAX" flash at tension 0.55). Tracking quality (qBar, shown
+as FORM) superlinearly drives sustainable speed. Final 6m: plant the second thumb to
+LEAN — a dip timed to land on the line saves up to 0.03s.
+
+Skill curve (validated headlessly, see scratchpad tune6.swift): perfect ≈ 9.86,
+great ≈ 9.95, good ≈ 10.1, average ≈ 10.7, chaotic ≈ 12.2 vs the AI field's 9.96–10.4.
 
 ## Product principles (POC)
 
