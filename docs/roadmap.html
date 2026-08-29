@@ -1,0 +1,600 @@
+<title>Dash Rivals Roadmap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* ——— Dash Rivals night-meet system. Single-theme by design: this doc lives in the
+     game's floodlit night world, so every surface and color is painted explicitly. */
+  :root {
+    --night: #0a0e1e;        /* sky */
+    --night-2: #121834;      /* scoreboard navy */
+    --night-3: #0d1226;      /* sunken panel */
+    --line: #232b4d;         /* panel edges */
+    --chalk: #f2f0e9;        /* lane paint */
+    --dim: #8b92ad;          /* secondary text */
+    --gold: #ffd526;         /* championship gold */
+    --gold-deep: #c9a406;
+    --clay: #b5453a;         /* track surface */
+    --led: #59d9ff;          /* LED boards / market intel */
+    --flag: #ff5a4e;         /* licensing gate */
+    --display: 'Anton', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+    --body: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+
+  body {
+    background: var(--night);
+    color: var(--chalk);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Broadcast bug stripe across the very top */
+  .bug-stripe {
+    height: 4px;
+    background: linear-gradient(90deg, var(--gold) 0 28%, var(--clay) 28% 64%, var(--led) 64% 100%);
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 28px; }
+
+  /* ——— Hero: floodlight + lane lines ——— */
+  header.hero {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(1100px 420px at 50% -160px, rgba(255, 244, 200, 0.14), transparent 68%),
+      repeating-linear-gradient(104deg, transparent 0 140px, rgba(242, 240, 233, 0.045) 140px 143px),
+      var(--night);
+    border-bottom: 1px solid var(--line);
+    padding: 72px 0 56px;
+  }
+  .doc-family {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+    color: var(--dim);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    margin-bottom: 44px;
+  }
+  .doc-family .this-doc { color: var(--gold); }
+  .doc-family span::before { content: "▸ "; color: var(--line); }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--led);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(56px, 10vw, 104px);
+    line-height: 0.94;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    transform: skewX(-6deg);
+    transform-origin: left bottom;
+    text-wrap: balance;
+  }
+  h1 .gold { color: var(--gold); }
+  .hero-sub {
+    max-width: 58ch;
+    margin-top: 22px;
+    font-size: 17.5px;
+    color: var(--dim);
+  }
+  .hero-sub strong { color: var(--chalk); font-weight: 600; }
+
+  /* ——— LED warning board ——— */
+  .led-board {
+    margin: 48px 0 0;
+    border: 1px solid var(--gold-deep);
+    border-radius: 10px;
+    background: linear-gradient(180deg, #16122c, #100d22);
+    padding: 26px 30px 24px;
+    box-shadow: 0 0 46px rgba(255, 213, 38, 0.09), inset 0 0 34px rgba(0, 0, 0, 0.5);
+  }
+  .led-board .board-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    color: var(--gold-deep);
+    margin-bottom: 10px;
+  }
+  .led-board h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(24px, 4.4vw, 38px);
+    letter-spacing: 0.03em;
+    color: var(--gold);
+    text-transform: uppercase;
+    text-shadow: 0 0 22px rgba(255, 213, 38, 0.45);
+    margin-bottom: 10px;
+  }
+  .led-board p { color: var(--dim); max-width: 66ch; font-size: 15.5px; }
+  .led-board p strong { color: var(--chalk); font-weight: 600; }
+
+  /* ——— Section scaffolding ——— */
+  main { padding: 20px 0 0; }
+  section.block { padding: 44px 0 8px; }
+
+  .session-head {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    border-bottom: 2px solid var(--clay);
+    padding-bottom: 10px;
+    margin-bottom: 26px;
+  }
+  .session-head .tag {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    color: var(--clay);
+    white-space: nowrap;
+  }
+  .session-head h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(24px, 4vw, 34px);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .session-intro { color: var(--dim); max-width: 68ch; margin: -10px 0 26px; font-size: 15px; }
+
+  /* ——— Vision + market panels ——— */
+  .panel-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+  @media (max-width: 720px) { .panel-row { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--night-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 26px 28px;
+  }
+  .panel h3 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 21px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 12px;
+  }
+  .panel p { color: var(--dim); font-size: 15px; }
+  .panel p + p { margin-top: 10px; }
+  .panel .formula {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--gold);
+    display: block;
+    margin: 14px 0 4px;
+    line-height: 1.9;
+  }
+  .panel.market { border-color: rgba(89, 217, 255, 0.35); }
+  .panel.market h3 { color: var(--led); }
+
+  /* ——— Phase rows (start-list style) ——— */
+  .phase {
+    display: grid;
+    grid-template-columns: 86px 1fr;
+    gap: 24px;
+    background: var(--night-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px 28px 22px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 560px) { .phase { grid-template-columns: 1fr; gap: 8px; } }
+  .phase .num {
+    font-family: var(--display);
+    font-size: 46px;
+    line-height: 1;
+    color: var(--clay);
+    letter-spacing: 0.02em;
+    padding-top: 3px;
+  }
+  .phase .num small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--dim);
+    margin-bottom: 6px;
+  }
+  .phase h3 {
+    font-family: var(--body);
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: 0.01em;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .phase p { color: var(--dim); font-size: 15px; max-width: 66ch; }
+  .phase p strong { color: var(--chalk); font-weight: 600; }
+
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    padding: 3px 9px 2px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .badge.diff { background: rgba(255, 213, 38, 0.14); color: var(--gold); border: 1px solid rgba(255, 213, 38, 0.5); }
+  .badge.gate { background: rgba(255, 90, 78, 0.12); color: var(--flag); border: 1px solid rgba(255, 90, 78, 0.45); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--chalk);
+    background: var(--night-3);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 11px 3px;
+    white-space: nowrap;
+  }
+  .mkt {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    margin-top: 14px;
+    font-size: 13.5px;
+    color: var(--led);
+  }
+  .mkt .mkt-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    border: 1px solid rgba(89, 217, 255, 0.45);
+    border-radius: 4px;
+    padding: 2px 7px 1px;
+    flex-shrink: 0;
+  }
+  .loop-line {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--gold);
+    margin-top: 14px;
+    letter-spacing: 0.02em;
+  }
+
+  /* ——— Finish line ——— */
+  footer.finish {
+    margin-top: 72px;
+    border-top: 1px solid var(--line);
+    background:
+      repeating-linear-gradient(90deg, rgba(242, 240, 233, 0.05) 0 18px, transparent 18px 36px),
+      var(--night-3);
+    padding: 60px 0 72px;
+    text-align: center;
+  }
+  footer .kicker {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.24em;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  footer .closing {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(26px, 5vw, 44px);
+    line-height: 1.15;
+    text-transform: uppercase;
+    transform: skewX(-6deg);
+    text-wrap: balance;
+  }
+  footer .closing .gold { color: var(--gold); }
+  footer .meta {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+    margin-top: 26px;
+  }
+
+  ::selection { background: var(--gold); color: var(--night); }
+</style>
+
+<div class="bug-stripe"></div>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="doc-family">
+      <span>DOC 01 · BRIEF.md</span>
+      <span class="this-doc">DOC 02 · ROADMAP — this page</span>
+      <span>CLAUDE.md · guardrails</span>
+    </div>
+    <div class="eyebrow">Dash Rivals · Product Vision · Aug 2026</div>
+    <h1>The<br><span class="gold">Roadmap</span></h1>
+    <p class="hero-sub">Where Dash Rivals goes <strong>if the 100m earns it</strong> — from
+    one race under the lights to a full track-and-field universe. This document preserves
+    ideas. It does not schedule them.</p>
+
+    <div class="led-board">
+      <div class="board-label">TRACKSIDE NOTICE</div>
+      <h2>Do not build the roadmap yet</h2>
+      <p>The current objective is extremely narrow: <strong>build one phenomenal 100m
+      race</strong> (see BRIEF.md). Every phase below is contingent on that race being
+      fun. If the 100m isn't fun, none of this matters.</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="block">
+    <div class="wrap">
+      <div class="panel-row">
+        <div class="panel">
+          <h3>Product vision</h3>
+          <p>Expand the POC into a full track-and-field universe. The long-term
+          differentiator is the combination, not any single ingredient:</p>
+          <span class="formula">gameplay + realism + spectacle<br>+ simulation + sport fandom</span>
+          <p>— not just another arcade running game.</p>
+        </div>
+        <div class="panel market">
+          <h3>Market intel</h3>
+          <p><strong style="color: var(--chalk)">Speed Stars</strong> (39K ratings, 4.8★)
+          already ships 60m–800m, hurdles, a medley relay, customization, ghosts,
+          leaderboards, and cinematic replays.</p>
+          <p>Those are <em>existing market features</em> — table stakes, not
+          differentiators. Cyan notes below flag where they already compete.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="session-head"><span class="tag">SESSION 1 · PHASES 1–4</span><h2>Become the sport</h2></div>
+      <p class="session-intro">Turn a running game into a true track &amp; field game — depth first, then breadth.</p>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>01</div>
+        <div>
+          <h3>Make sprinting deep</h3>
+          <p>More events as expansion content, and real racecraft in every one: the player
+          should eventually make <strong>meaningful decisions</strong>, not execute a fixed
+          tapping rhythm.</p>
+          <div class="chips">
+            <span class="chip">60m</span><span class="chip">100m</span><span class="chip">150m</span>
+            <span class="chip">200m</span><span class="chip">400m</span><span class="chip">800m</span>
+            <span class="chip">block setup</span><span class="chip">drive phase</span>
+            <span class="chip">fatigue</span><span class="chip">wind</span>
+            <span class="chip">altitude</span><span class="chip">track surface</span><span class="chip">lane effects</span>
+          </div>
+          <div class="mkt"><span class="mkt-tag">MKT</span><span>Speed Stars already runs most of these distances — expansion, not differentiation.</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>02</div>
+        <div>
+          <h3>Hurdles</h3>
+          <p>Aim for <strong>greater depth, not mere presence</strong>: hurdle rhythm,
+          lead-leg selection, stride patterns, clipping, late-race fatigue.</p>
+          <div class="chips">
+            <span class="chip">100mH</span><span class="chip">110mH</span><span class="chip">400mH</span>
+            <span class="chip">stride pattern</span><span class="chip">lead leg</span><span class="chip">clipping</span>
+          </div>
+          <div class="mkt"><span class="mkt-tag">MKT</span><span>110mH and 400mH already exist in market.</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>03</div>
+        <div>
+          <h3>Relays</h3>
+          <p>Repeatedly requested by Speed Stars players — so make relays <strong>genuinely
+          interesting</strong>: baton exchanges, exchange-zone strategy, team composition,
+          runner order, anchor-leg drama.</p>
+          <div class="chips">
+            <span class="chip">4×100</span><span class="chip">4×200</span><span class="chip">4×400</span>
+            <span class="chip">mixed</span><span class="chip">medley</span>
+            <span class="chip">exchange zones</span><span class="chip">anchor drama</span>
+          </div>
+          <div class="mkt"><span class="mkt-tag">MKT</span><span>A medley relay shipped there too — relays alone are no longer an untouched opportunity.</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>04</div>
+        <div>
+          <h3>Field events</h3>
+          <p>The larger opportunity: a <strong>true track &amp; field game</strong>, not just
+          a running game. Players specifically ask competitors for long and triple jump.</p>
+          <div class="chips">
+            <span class="chip">long jump</span><span class="chip">triple jump</span><span class="chip">high jump</span>
+            <span class="chip">pole vault</span><span class="chip">javelin</span><span class="chip">shot put</span>
+            <span class="chip">discus</span><span class="chip">hammer</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="session-head"><span class="tag">SESSION 2 · PHASES 5–6</span><h2>Make it a career</h2></div>
+      <p class="session-intro">Track stops being isolated races and becomes a sporting life.</p>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>05</div>
+        <div>
+          <h3>Championship mode</h3>
+          <p>A fictional international athletics universe with a real competition ladder —
+          heats, semifinals, finals, qualification standards, lane assignments, advancing on
+          place and time. <strong>Where the product could become much bigger.</strong></p>
+          <div class="chips">
+            <span class="chip">local meets</span><span class="chip">nationals</span>
+            <span class="chip">continentals</span><span class="chip">worlds</span>
+            <span class="chip">olympic-style championship</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>06</div>
+        <div>
+          <h3>Athlete development</h3>
+          <p>Create a fictional athlete and develop them — with training mini-games that stay
+          <strong>connected to actual track performance</strong>, never a generic RPG.</p>
+          <div class="chips">
+            <span class="chip">acceleration</span><span class="chip">top speed</span>
+            <span class="chip">speed endurance</span><span class="chip">reaction</span>
+            <span class="chip">technique</span><span class="chip">stamina</span><span class="chip">specialization</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="session-head"><span class="tag">SESSION 3 · PHASES 7–9</span><h2>Simulate everything</h2></div>
+      <p class="session-intro">The MotionAthlete instinct, made playable: answer "who would win?" for any race you can imagine.</p>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>07</div>
+        <div>
+          <h3>The simulation engine <span class="badge diff">Differentiator</span></h3>
+          <p>Construct hypothetical races: pick eight athletes, set the conditions, press
+          <strong>SIMULATE</strong>, and watch it like a broadcast. Taps directly into the
+          appeal of MotionAthlete-style videos.</p>
+          <div class="chips">
+            <span class="chip">distance</span><span class="chip">stadium</span><span class="chip">weather</span>
+            <span class="chip">wind</span><span class="chip">altitude</span><span class="chip">era</span>
+            <span class="chip">attributes</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>08</div>
+        <div>
+          <h3>"What if?" mode</h3>
+          <p>A playable athletics sandbox. What happens with a +2.0 tailwind for everyone?
+          At altitude? Over 150m? When a 100m specialist meets a 200m specialist?</p>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>09</div>
+        <div>
+          <h3>Legends <span class="badge gate">Licensing gate</span></h3>
+          <p>Historical and current athletes, <strong>only through appropriate
+          licensing</strong>, and much later. Never assumed for the POC — every athlete in
+          the game today is fictional.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="session-head"><span class="tag">SESSION 4 · PHASES 10–11</span><h2>Race the world</h2></div>
+      <p class="session-intro">Other people in the lanes, and more places to meet them.</p>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>10</div>
+        <div>
+          <h3>Real multiplayer</h3>
+          <p>The opportunity is multiplayer that feels like an <strong>actual track
+          competition</strong> — not a feature checkbox.</p>
+          <div class="chips">
+            <span class="chip">live 1v1</span><span class="chip">8-player race</span>
+            <span class="chip">ghost racing</span><span class="chip">ranked</span><span class="chip">tournaments</span>
+          </div>
+          <div class="mkt"><span class="mkt-tag">MKT</span><span>Ghosts and global leaderboards already exist in market — copying them isn't enough.</span></div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>11</div>
+        <div>
+          <h3>Stadiums</h3>
+          <p>Fictional and, eventually, appropriately licensed venues — each with its own
+          atmosphere and conditions.</p>
+          <div class="chips">
+            <span class="chip">olympic-style</span><span class="chip">indoor track</span>
+            <span class="chip">university</span><span class="chip">rainy meet</span>
+            <span class="chip">night meet</span><span class="chip">small local meet</span>
+            <span class="chip">championship stadium</span>
+          </div>
+          <div class="mkt"><span class="mkt-tag">MKT</span><span>Competitors' players specifically request more venues and indoor facilities.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="session-head"><span class="tag">SESSION 5 · PHASES 12–14</span><h2>Broadcast it</h2></div>
+      <p class="session-intro">The game becomes a virtual athletics broadcast — and the broadcast becomes the growth engine.</p>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>12</div>
+        <div>
+          <h3>Spectator &amp; broadcast mode</h3>
+          <p>Watch races, switch cameras, follow splits, compare athletes, build cinematic
+          replays. Could become a <strong>huge part of the game's identity</strong>.</p>
+          <div class="chips">
+            <span class="chip">camera switching</span><span class="chip">live splits</span>
+            <span class="chip">comparisons</span><span class="chip">cinematic replays</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>13</div>
+        <div>
+          <h3>Shareable race videos <span class="badge diff">Differentiator</span></h3>
+          <p>One tap after a race: <strong>GENERATE REPLAY</strong> — a short-form-friendly
+          clip with cinematic cameras and broadcast overlays ("9.87 · NEW WORLD RECORD ·
+          0.03 VICTORY"). A natural TikTok / Shorts growth loop:</p>
+          <div class="loop-line">play → spectacular race → share → someone discovers → play</div>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="num"><small>PHASE</small>14</div>
+        <div>
+          <h3>Community &amp; creator tools</h3>
+          <p>Custom races, tournaments, challenge links, shareable simulations, creator
+          codes. A creator posts <strong>"Can you beat my 100m?"</strong> — or "I simulated
+          the fastest 200m runners ever." Directly aligned with the MotionAthlete
+          inspiration.</p>
+          <div class="chips">
+            <span class="chip">custom races</span><span class="chip">challenges</span>
+            <span class="chip">community leaderboards</span><span class="chip">creator codes</span>
+            <span class="chip">challenge links</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="finish">
+  <div class="wrap">
+    <div class="kicker">Product principle</div>
+    <div class="closing">If the 100m isn't fun,<br><span class="gold">none of this matters.</span></div>
+    <div class="meta">DASH RIVALS · DOC 02 / ROADMAP · lives at docs/roadmap.html · source: ROADMAP.md</div>
+  </div>
+</footer>
