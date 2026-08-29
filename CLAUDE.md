@@ -94,3 +94,13 @@ broadcast REPLAY (tap to skip) into results (photo-finish stamp, wind reading).
 - All athletes are fictional and original. No real athletes, no real likenesses.
 - Do not add: multiplayer, backend, accounts, monetization, career mode, extra events,
   extra stadiums, or any Phase 1–14 roadmap feature.
+
+## Athlete v4 (Mixamo pipeline)
+
+`DashRivals/Assets/Mixamo/` is the drop zone (see its README) for a Mixamo
+character + sprint/running/idle/crouch/victory clips (.dae preferred, .usdz ok).
+`SkinnedRunner.loadTemplate()` detects them at launch and swaps every athlete to
+the skinned mesh (clips speed-slaved to stride rate, spine-layered lean via
+renderer(_:didApplyAnimationsAtTime:)); with no assets the game silently uses
+the procedural v3 `RunnerFigure`. Both conform to `AthleteFigure`. Expect a
+bone-axis/tint tuning pass the first time real assets land.

@@ -78,7 +78,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     let audio = GameAudio()
     let cameraDirector = CameraDirector()
     private let stadium = Stadium()
-    private var figures: [RunnerFigure] = []
+    private var figures: [AthleteFigure] = []
+    private var figureLeans = [Double](repeating: 0.1, count: 8)
 
     // MARK: Loop bookkeeping (render thread)
     private var lastTime: TimeInterval?
@@ -140,8 +141,15 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         scene.rootNode.addChildNode(cameraDirector.node)
 
         engine.loadField()
+        // v4 skinned athletes when Mixamo assets are bundled; procedural v3 otherwise.
+        let template = SkinnedRunner.loadTemplate()
         for r in engine.runners {
-            let fig = RunnerFigure(athlete: r.athlete, leftLegForward: r.lane % 2 == 0, lane: r.lane)
+            let fig: AthleteFigure
+            if let template {
+                fig = SkinnedRunner(athlete: r.athlete, template: template)
+            } else {
+                fig = RunnerFigure(athlete: r.athlete, leftLegForward: r.lane % 2 == 0, lane: r.lane)
+            }
             fig.root.position = SCNVector3(Roster.laneX(r.lane), 0, -1.4)
             fig.mode = .idle
             scene.rootNode.addChildNode(fig.root)
@@ -379,6 +387,13 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                               playerZ: Float(pd) - 0.35, v: 0, phase: 0)
         if replayClock >= replayEnd || skipReplay {
             finishCelebration()
+        }
+    }
+
+    /// Safe point to layer procedural bone tweaks over evaluated animation clips.
+    func renderer(_ renderer: SCNSceneRenderer, didApplyAnimationsAtTime time: TimeInterval) {
+        for (i, fig) in figures.enumerated() {
+            fig.postAnimationAdjust(lean: figureLeans[i])
         }
     }
 
@@ -763,7 +778,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 : max(0.06, 0.30 * (1 - r.velocity / 11.5))
             // The dip at the line.
             if r.athlete.isPlayer, sceneTime < playerLeanUntil { lean = 0.85 }
-            fig.update(phase: r.stridePhase, speed: r.velocity, lean: r.velocity > 0.2 ? lean : 0.1,
+            figureLeans[i] = r.velocity > 0.2 ? lean : 0.1
+            fig.update(phase: r.stridePhase, speed: r.velocity, lean: figureLeans[i],
                        time: sceneTime)
 
             // Footstep audio + haptic: two steps per stride cycle.
