@@ -332,46 +332,51 @@ struct RaceHUD: View {
 }
 
 /// Joystick effort gauge: push your thumb out from the stick to raise effort.
-/// The gold ring is the target radius; the white ring is your thumb's deflection.
-/// Red rim means tension — you're pushing past the band and tightening up.
+/// The gold annulus is the moving target; your deflection ring rides under your
+/// thumb (the touch mapping is 1:1 with this geometry). Ring turns white-in-band,
+/// red when you're off it; red rim = tension building.
 struct EffortGauge: View {
     let effort: Double
     let bandCenter: Double
     let bandHalf: Double
     let tension: Double
 
-    private let size: CGFloat = 130
+    private let size: CGFloat = 190
     private let deadR: CGFloat = 9
 
     private func r(_ value: Double) -> CGFloat {
         deadR + (size / 2 - 4 - deadR) * CGFloat(min(1, max(0, value)))
     }
 
+    private var inBand: Bool {
+        abs(effort - bandCenter) <= bandHalf
+    }
+
     var body: some View {
         ZStack {
             // Stick base
             Circle()
-                .fill(Color.black.opacity(0.42))
+                .fill(Color.black.opacity(0.40))
                 .overlay(
                     Circle().strokeBorder(tension > 0.4 ? Style.bad.opacity(0.3 + 0.6 * tension)
                                                         : Color.white.opacity(0.16),
                                           lineWidth: tension > 0.4 ? 2.5 : 1)
                 )
-            Circle().fill(Color.white.opacity(0.25)).frame(width: 7, height: 7)
-            // Target ring: the band as an annulus
+            Circle().fill(Color.white.opacity(0.25)).frame(width: 8, height: 8)
+            // Target band: a gold annulus — put your thumb inside it.
             Circle()
-                .stroke(Style.gold.opacity(0.42),
-                        lineWidth: max(7, (r(bandCenter + bandHalf) - r(bandCenter - bandHalf))))
+                .stroke(Style.gold.opacity(inBand ? 0.5 : 0.38),
+                        lineWidth: max(9, (r(bandCenter + bandHalf) - r(bandCenter - bandHalf))))
                 .frame(width: r(bandCenter) * 2, height: r(bandCenter) * 2)
             Circle()
-                .stroke(Style.gold.opacity(0.9), lineWidth: 1.2)
+                .stroke(Style.gold.opacity(0.9), lineWidth: 1.4)
                 .frame(width: r(bandCenter + bandHalf) * 2, height: r(bandCenter + bandHalf) * 2)
             Circle()
-                .stroke(Style.gold.opacity(0.9), lineWidth: 1.2)
+                .stroke(Style.gold.opacity(0.9), lineWidth: 1.4)
                 .frame(width: r(bandCenter - bandHalf) * 2, height: r(bandCenter - bandHalf) * 2)
-            // Thumb deflection ring
+            // Thumb deflection ring — white on target, red off it.
             Circle()
-                .stroke(.white, lineWidth: 3)
+                .stroke(inBand ? Color.white : Style.bad, lineWidth: 3.5)
                 .shadow(color: .black.opacity(0.7), radius: 3)
                 .frame(width: r(effort) * 2, height: r(effort) * 2)
         }
