@@ -21,6 +21,7 @@ struct PlayerSummary {
     let split50: Double?
     let topSpeed: Double
     let leanCredit: Double
+    let burn: Double        // moments mechanic only (0 in band mode)
     let isNewPB: Bool
     let previousPB: Double?
 }
@@ -53,6 +54,12 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     @Published var formValue: Double = 0.9          // qBar — tracking quality
     @Published var gaugeVisible = false
     @Published var phaseLabel: String? = nil        // DRIVE / MAX VELOCITY / HOLD ON
+    // A/B mechanic state
+    @Published var mechanic: SprintMechanic = .band
+    @Published var burnValue: Double = 0
+    @Published var leanCue = false
+    @Published var effortL: Double = 0.85
+    @Published var effortR: Double = 0.85
 
     // MARK: Scene
     let scene = SCNScene()
@@ -78,9 +85,10 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     // Input events from the touch view (main), consumed on the render thread.
     private let inputLock = NSLock()
     private var pendingInputs: [(side: TapSide, isDown: Bool, hostTime: Double)] = []
-    private var pendingEffort: Double? = nil
-    private var heldSides: Set<Bool> = []          // true = right
-    private var sideDownAt: [Bool: Double] = [:]   // engine time each side last went down
+    private var latestEffort: [Bool: Double] = [:]  // per side (true = right)
+    private var heldSides: Set<Bool> = []           // true = right
+    private var sideDownAt: [Bool: Double] = [:]    // engine time each side last went down
+    private var leanFeedbackDone = false
 
     // Haptics
     private let haptics = Haptics()
@@ -103,6 +111,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         return 0.9
     }
     private var apNoise: Double = 0
+    private var nextAutoTap: Double = 0
 
     override init() {
         super.init()
@@ -118,8 +127,21 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             figures.append(fig)
         }
         bestTimeText = Self.formatPB(storedPB)
+        if let raw = UserDefaults.standard.string(forKey: "mechanic"),
+           let m = SprintMechanic(rawValue: raw) {
+            mechanic = m
+            engine.mechanic = m
+        }
         tapHaptic.prepare()
         heavyHaptic.prepare()
+    }
+
+    /// Menu toggle: switch the player mechanic for upcoming races.
+    func setMechanic(_ m: SprintMechanic) {
+        mechanic = m
+        UserDefaults.standard.set(m.rawValue, forKey: "mechanic")
+        onRender { [self] in engine.mechanic = m }
+        audio.playTick()
     }
 
     // MARK: Persistence
@@ -146,6 +168,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             playerFinishedAt = nil
             celebrationAt = nil
             nextPantAt = 0
+            nextAutoTap = 0
+            leanFeedbackDone = false
             engine.setPhase(.intro)
             phaseTime = 0
             cameraDirector.mode = .intro
@@ -168,6 +192,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             playerFinishedAt = nil
             celebrationAt = nil
             nextPantAt = 0
+            nextAutoTap = 0
+            leanFeedbackDone = false
             engine.setPhase(.marks)
             phaseTime = 0
             cameraDirector.mode = .set
@@ -177,6 +203,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         }
         publish { $0.uiPhase = .marks; $0.summary = nil; $0.resultRows = [] }
         audio.playTick()
+        audio.playAnnouncer(.marks)
     }
 
     func backToMenu() {
@@ -201,10 +228,10 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         inputLock.unlock()
     }
 
-    /// Continuous effort from the riding thumb, 0 (bottom) .. 1 (top).
-    func effortInput(_ e: Double) {
+    /// Continuous per-thumb effort, 0 (bottom) .. 1 (top).
+    func effortInput(side: TapSide, value: Double) {
         inputLock.lock()
-        pendingEffort = e
+        latestEffort[side == .right] = value
         inputLock.unlock()
     }
 
@@ -240,8 +267,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         processInputs()
         runAutopilot(dt: dt)
 
-        // Slow-mo choreography: the launch and the final meters stretch out.
-        timeScale += (currentTimeScaleTarget() - timeScale) * min(1, dt * 8)
+        // Slow-mo choreography: a beat on the gun, a stretch through the line.
+        timeScale += (currentTimeScaleTarget() - timeScale) * min(1, dt * 10)
         let events = engine.update(dt: dt * timeScale)
         handle(events: events)
         updateSpectacle()
@@ -257,13 +284,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         inputLock.lock()
         let inputs = pendingInputs
         pendingInputs.removeAll()
-        let effort = pendingEffort
-        pendingEffort = nil
+        let effL = latestEffort[false]
+        let effR = latestEffort[true]
         inputLock.unlock()
-
-        if let e = effort, engine.phase == .racing {
-            engine.setPlayerEffort(e)
-        }
 
         for (side, isDown, hostTime) in inputs {
             if isDown { heldSides.insert(side == .right) } else { heldSides.remove(side == .right) }
@@ -278,6 +301,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 publish { $0.holdingL = l; $0.holdingR = r }
                 if l && r {
                     engine.playerIsSet()
+                    audio.playAnnouncer(.set)
                     audio.playSetBeep()
                     audio.playHeartbeat()
                     audio.crowdTarget = 0.08   // the stadium holds its breath
@@ -291,24 +315,32 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 if !engine.playerLaunched {
                     // First movement after the gun — usually the thumb lift.
                     engine.playerLaunch(engineTime: engineT)
-                    publish { $0.gaugeVisible = true }
                     haptics.launch()
-                } else if isDown {
-                    // Second thumb planted in the final meters = the lean.
-                    let opposite = side == .left
-                    let oppositeHeldLong = heldSides.contains(opposite)
-                        && (engineT - (sideDownAt[opposite] ?? -1)) > 0.12
-                    if oppositeHeldLong, engine.player.distance >= engine.tuning.leanZone,
-                       let v = engine.executeLean() {
-                        publish { $0.verdictFlash = VerdictFlash(text: v.rawValue, good: true) }
-                        playerLeanUntil = sceneTime + 0.55
-                        haptics.lean()
+                    cameraDirector.impulse(0.5)
+                } else if isDown, engine.mechanic == .moments,
+                          engine.player.finishTime == nil, engine.player.distance < 32 {
+                    if engine.momentsDriveTap(engineTime: engineT) {
+                        haptics.footstep(speedFactor: 0.7)
                     }
                 }
                 if isDown { sideDownAt[side == .right] = engineT }
             default:
                 break
             }
+        }
+
+        // Feed both thumbs to the band model (also drives the moments hybrid past 30m).
+        if engine.phase == .racing, engine.playerLaunched {
+            engine.setPlayerEfforts(left: heldSides.contains(false) ? effL : nil,
+                                    right: heldSides.contains(true) ? effR : nil)
+        }
+
+        // Lean feedback (the dip can be triggered inside the engine or by autopilot).
+        if engine.leanExecutedAt != nil, !leanFeedbackDone {
+            leanFeedbackDone = true
+            publish { $0.verdictFlash = VerdictFlash(text: TapVerdict.lean.rawValue, good: true) }
+            playerLeanUntil = sceneTime + 0.55
+            haptics.lean()
         }
     }
 
@@ -346,6 +378,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         cameraDirector.mode = .set
         let px = Roster.laneX(Roster.playerLane)
         cameraDirector.snap(to: SIMD3(px + 0.9, 1.25, -4.6), look: SIMD3(px, 0.75, 3))
+        audio.playAnnouncer(.marks)
         publish { $0.uiPhase = .marks; $0.introCard = nil }
     }
 
@@ -358,10 +391,11 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             cameraDirector.impulse(0.55)
             cameraDirector.mode = .chase
             haptics.gun()
-            // The launch stretches out for a beat before time catches up.
-            timeScale = 0.35
-            heldScale = 0.5
-            slowMoHoldUntil = sceneTime + 0.45
+            // A short impact-freeze on the bang, then time SNAPS back — the field
+            // should explode, not wade, out of the blocks.
+            timeScale = 0.3
+            heldScale = 0.35
+            slowMoHoldUntil = sceneTime + 0.18
             publish {
                 $0.uiPhase = .racing
                 $0.gunFlash = true
@@ -396,7 +430,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // Hold the super-slow-mo through the line, then let time snap back.
             heldScale = 0.4
             slowMoHoldUntil = sceneTime + 0.55
-            publish { $0.finishFlash = true; $0.gaugeVisible = false }
+            publish { $0.finishFlash = true }
             DispatchQueue.main.async {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { self.finishFlash = false }
             }
@@ -441,6 +475,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                                 split50: engine.player.split50,
                                 topSpeed: engine.player.topSpeed,
                                 leanCredit: engine.leanCredit,
+                                burn: engine.mechanic == .moments ? engine.burn : 0,
                                 isNewPB: isNewPB,
                                 previousPB: prevPB)
 
@@ -455,13 +490,15 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 figures[i].mode = .exhausted
             }
         }
-        if isNewPB { audio.playPB() }
+        if isNewPB {
+            audio.playPB()
+            audio.playAnnouncer(.newPB)
+        }
 
         publish {
             $0.resultRows = rows
             $0.summary = sum
             $0.uiPhase = .results
-            $0.gaugeVisible = false
             $0.bestTimeText = Self.formatPB(isNewPB ? pTime : prevPB)
         }
         if isNewPB {
@@ -518,11 +555,17 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             if !engine.playerLaunched {
                 if engine.timeSinceGun > 0.14 {
                     engine.playerLaunch(engineTime: 0.14)
-                    publish { $0.gaugeVisible = true }
                 }
             } else if engine.player.distance > 98.2, engine.leanExecutedAt == nil,
                       engine.player.finishTime == nil {
                 _ = engine.executeLean()
+            } else if engine.mechanic == .moments, engine.player.distance < 32 {
+                // Mash the drive at a quality-dependent rate.
+                if engine.timeSinceGun >= nextAutoTap {
+                    _ = engine.momentsDriveTap(engineTime: engine.timeSinceGun)
+                    let rate = 3.0 + 1.6 * autoQuality
+                    nextAutoTap = engine.timeSinceGun + (1 / rate) * (1 + gaussianRand() * 0.08)
+                }
             } else {
                 // Track the band like a human: lag, smoothed noise, over-press bias.
                 let q = autoQuality
@@ -570,8 +613,11 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 break
             }
 
-            // Acceleration lean: deep at launch, upright at speed.
-            var lean = max(0.06, 0.58 * (1 - r.velocity / 11.5))
+            // Drive lean by distance, not speed: buried out of the blocks (~50°),
+            // rising smoothly through the first ~25m.
+            var lean = r.finishTime == nil
+                ? 0.06 + 0.88 * exp(-r.distance / 11.0)
+                : max(0.06, 0.30 * (1 - r.velocity / 11.5))
             // The dip at the line.
             if r.athlete.isPlayer, sceneTime < playerLeanUntil { lean = 0.85 }
             fig.update(phase: r.stridePhase, speed: r.velocity, lean: r.velocity > 0.2 ? lean : 0.1,
@@ -584,8 +630,13 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 if r.athlete.isPlayer {
                     audio.playFootstep(loud: true)
                     haptics.footstep(speedFactor: Float(min(1, r.velocity / 12)))
+                    // The first strides are warfare: camera concussion + power grunts.
+                    if r.distance < 22, r.finishTime == nil {
+                        cameraDirector.impulse(0.13)
+                        if stepCount <= 5, stepCount % 2 == 0 { audio.playBreath(volume: 0.65) }
+                    }
                     // Breathe out every second stride cycle, harder as the race wears on.
-                    if stepCount % 4 == 0, r.distance > 15, r.finishTime == nil {
+                    if stepCount % 4 == 0, r.distance > 22, r.finishTime == nil {
                         let strain = Float(min(1, engine.timeSinceGun / 10))
                         audio.playBreath(volume: 0.25 + 0.5 * strain)
                     }
@@ -645,14 +696,26 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             let effort = engine.playerEffort
             let tension = engine.tension
             let form = engine.qBar
+            let burnV = engine.burn
+            let effL = engine.playerEffortL
+            let effR = engine.playerEffortR
+            let gauge = racing && engine.player.finishTime == nil
+                && (engine.mechanic == .band || engine.player.distance > 26)
+            let lean = racing && engine.player.finishTime == nil
+                && engine.player.distance > 88 && engine.leanExecutedAt == nil
             publish {
                 $0.clockText = clockStr
                 $0.speedText = speedStr
                 $0.formValue = form
                 $0.effortValue = effort
+                $0.effortL = effL
+                $0.effortR = effR
                 $0.bandCenter = band.center
                 $0.bandHalf = band.half
                 $0.tensionValue = tension
+                $0.burnValue = burnV
+                if $0.gaugeVisible != gauge { $0.gaugeVisible = gauge }
+                if $0.leanCue != lean { $0.leanCue = lean }
                 if $0.prompt != promptStr { $0.prompt = promptStr }
                 if $0.phaseLabel != phaseStr { $0.phaseLabel = phaseStr }
             }
@@ -677,9 +740,16 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             if !engine.playerLaunched { return "GUN! LIFT A THUMB!" }
             if engine.player.finishTime == nil, engine.player.distance > 88,
                engine.leanExecutedAt == nil {
-                return "LEAN — PLANT YOUR OTHER THUMB"
+                return "DIP — YANK BOTH THUMBS DOWN!"
             }
-            return engine.timeSinceGun < 2.6 ? "SLIDE YOUR THUMB — RIDE THE GOLD BAND" : nil
+            switch engine.mechanic {
+            case .band:
+                return engine.timeSinceGun < 2.6 ? "RIDE THE GOLD BANDS — BOTH THUMBS" : nil
+            case .moments:
+                if engine.player.distance < 30 { return "POUND IT — TAP FAST!" }
+                if engine.player.distance < 42 { return "NOW GRAB THE BANDS — RIDE" }
+                return nil
+            }
         default: return nil
         }
     }

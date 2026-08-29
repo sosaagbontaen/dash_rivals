@@ -21,6 +21,8 @@ final class GameAudio {
     private var heartbeat: AVAudioPCMBuffer!
     private var breaths: [AVAudioPCMBuffer] = []
 
+    private var announcer: Announcer!
+
     /// Crowd volume target; ramped smoothly in update().
     var crowdTarget: Float = 0.4
     /// Wind-rush volume target (scaled with player speed); ramped in update().
@@ -38,6 +40,7 @@ final class GameAudio {
         tick = Synth.tone(freq: 1250, seconds: 0.06, attack: 0.002, decay: 28, gain: 0.18, format: format)
         pbJingle = Synth.jingle(format: format)
         heartbeat = Synth.heartbeat(format: format)
+        announcer = Announcer(format: format)
         breaths = [Synth.breath(pitch: 0.95, grunt: false, format: format),
                    Synth.breath(pitch: 1.12, grunt: false, format: format),
                    Synth.breath(pitch: 1.0, grunt: true, format: format)]
@@ -99,6 +102,10 @@ final class GameAudio {
 
     func playGun() { playSFX(gun, volume: 1.0) }
     func playWhoosh() { playSFX(whoosh, volume: 0.65) }
+    func playAnnouncer(_ phrase: Announcer.Phrase) {
+        guard let buf = announcer.buffer(for: phrase) else { return }
+        playSFX(buf, volume: 0.9)
+    }
     func playSetBeep() { playSFX(setBeep, volume: 0.8) }
     func playFootstep(loud: Bool) { playSFX(steps.randomElement()!, volume: loud ? 0.85 : 0.22) }
     func playBreath(volume: Float) { playSFX(breaths.randomElement()!, volume: volume) }

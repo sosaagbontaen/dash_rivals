@@ -44,9 +44,10 @@ final class Haptics {
         }
     }
 
-    /// Ground contact — sharper and harder as speed rises.
+    /// Ground contact. Early drive steps are heavy body-weight slams;
+    /// top-speed turnover is fast light ticks.
     func footstep(speedFactor: Float) {
-        play([(0, 0.3 + 0.45 * speedFactor, 0.4 + 0.35 * speedFactor)])
+        play([(0, 0.85 - 0.4 * speedFactor, 0.35 + 0.5 * speedFactor)])
     }
 
     /// The gun: a crack and its echo in the chest.

@@ -173,34 +173,46 @@ final class RunnerFigure {
     private func poseRun(phase: Double, speed: Double, lean: Double) {
         let s = Float(min(1.0, speed / 11.0))
         let w = Float(phase * 2 * .pi)
+        // Drive intensity: deep lean = the violent, clawing block-exit strides.
+        let drive = max(0, min(1, (Float(lean) - 0.15) / 0.6))
 
-        hips.position.y = hipHeight - 0.03 * (1 - s) + 0.038 * s * sin(2 * w)
+        hips.position.y = hipHeight - 0.03 * (1 - s) - 0.075 * drive + 0.038 * s * sin(2 * w)
         hips.eulerAngles = SCNVector3(0, 0, 0.03 * s * sin(w))
 
         torso.eulerAngles = SCNVector3(Float(lean) + 0.05 * s * sin(2 * w + 1.2),
-                                       0.10 * s * sin(w), 0)
-        headPivot.eulerAngles = SCNVector3(-Float(lean) * 0.8, 0, 0)
+                                       (0.10 + 0.08 * drive) * s * sin(w), 0)
+        // Head stays buried during the drive, lifts as the body rises.
+        headPivot.eulerAngles = SCNVector3(-Float(lean) * (0.8 - 0.45 * drive), 0, 0)
 
-        // Legs: thigh swing + knee flexion during swing-through.
+        // Gait asymmetry: real swing snaps forward and drags back — not a pure sine.
+        func swingShape(_ x: Float) -> Float { sin(x + 0.32 * sin(x)) }
+
+        // Legs: thigh swing + knee flexion; punching amplitude out of the blocks.
+        let legAmp = 1 + 0.35 * drive
         func legPose(_ thigh: SCNNode, _ knee: SCNNode, _ ankle: SCNNode, _ ph: Float) {
-            let swing = s * (0.38 + 0.88 * sin(ph))
+            let swing = s * (0.38 + 0.88 * swingShape(ph)) * legAmp
             thigh.eulerAngles = SCNVector3(swing + Float(lean) * 0.35, 0, 0)
-            let flex = -s * (0.28 + 1.15 * max(0, sin(ph + 1.05)))
+            // Sharp heel whip during swing-through, near-straight at stance.
+            let flex = -s * (0.22 + (1.25 + 0.3 * drive) * pow(max(0, sin(ph + 1.15)), 1.35))
             knee.eulerAngles = SCNVector3(min(-0.06, flex), 0, 0)
-            let toe = s * (0.35 + 0.45 * max(0, sin(ph - 0.6)))
+            // Toe-off extension behind, dorsiflexed (toes up) through the swing.
+            let toe = s * (0.18 + 0.55 * sin(ph - 2.1))
             ankle.eulerAngles = SCNVector3(toe, 0, 0)
         }
         legPose(thighL, kneeL, ankleL, w)
         legPose(thighR, kneeR, ankleR, w + .pi)
 
-        // Arms: counter-swing, elbows pumped.
-        func armPose(_ shoulder: SCNNode, _ elbow: SCNNode, _ ph: Float) {
-            let swing = s * (1.05 * sin(ph)) - 0.12
-            shoulder.eulerAngles = SCNVector3(swing, 0, s * 0.10)
-            elbow.eulerAngles = SCNVector3(-1.45 - 0.35 * s * max(0, -sin(ph)), 0, 0)
+        // Arms: counter-swing with a cross-body arc; elbow opens on the backswing,
+        // hand pumps up toward the chin at the front.
+        let armAmp = 1 + 0.5 * drive
+        func armPose(_ shoulder: SCNNode, _ elbow: SCNNode, _ ph: Float, mirror: Float) {
+            let swing = s * (1.05 * swingShape(ph)) * armAmp - 0.12
+            shoulder.eulerAngles = SCNVector3(swing, mirror * 0.20 * s * sin(ph), mirror * -0.14)
+            let open = 0.55 * s * max(0, -sin(ph))     // unfolds behind
+            elbow.eulerAngles = SCNVector3(-1.5 + open - 0.2 * s * max(0, sin(ph)), 0, 0)
         }
-        armPose(shoulderL, elbowL, w + .pi)   // opposite of left leg
-        armPose(shoulderR, elbowR, w)
+        armPose(shoulderL, elbowL, w + .pi, mirror: 1)    // opposite of left leg
+        armPose(shoulderR, elbowR, w, mirror: -1)
         shoulderL.eulerAngles.z = -0.14
         shoulderR.eulerAngles.z = 0.14
     }

@@ -48,6 +48,16 @@ struct MenuOverlay: View {
                 }
                 .padding(.top, 16)
 
+                // A/B mechanic toggle (dev)
+                HStack(spacing: 6) {
+                    Text("MECHANIC")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                    mechanicChip("BAND", .band)
+                    mechanicChip("MOMENTS", .moments)
+                }
+                .padding(.top, 10)
+
                 Text("PROOF OF CONCEPT")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.4))
@@ -56,6 +66,17 @@ struct MenuOverlay: View {
             }
             .padding(.leading, 46)
             Spacer()
+        }
+    }
+
+    private func mechanicChip(_ label: String, _ m: SprintMechanic) -> some View {
+        Button { game.setMechanic(m) } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(game.mechanic == m ? .black : .white.opacity(0.7))
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(game.mechanic == m ? Style.gold : Color.white.opacity(0.12),
+                            in: Capsule())
         }
     }
 }
@@ -229,7 +250,11 @@ struct RaceHUD: View {
                         .shadow(color: .black.opacity(0.8), radius: 6)
                 }
                 HStack(spacing: 10) {
-                    FormMeter(value: game.formValue)
+                    if game.mechanic == .band {
+                        FormMeter(value: game.formValue)
+                    } else {
+                        BurnMeter(value: game.burnValue)
+                    }
                     HStack(spacing: 4) {
                         Text(game.speedText).font(Style.mono(18)).foregroundStyle(.white)
                         Text("m/s").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.6))
@@ -241,15 +266,31 @@ struct RaceHUD: View {
                     .padding(.bottom, 16)
             }
 
-            // Effort gauge: your thumb rides the gold band.
+            // The dip cue: yank both thumbs down at the line.
+            if game.leanCue {
+                LeanCueView()
+                    .offset(y: -20)
+            }
+
+            // Twin effort gauges at the bottom corners — one per thumb,
+            // low so your eyes stay on the race.
             if game.gaugeVisible {
-                HStack {
+                VStack {
                     Spacer()
-                    EffortGauge(effort: game.effortValue,
-                                bandCenter: game.bandCenter,
-                                bandHalf: game.bandHalf,
-                                tension: game.tensionValue)
-                        .padding(.trailing, 14)
+                    HStack {
+                        EffortGauge(effort: game.effortL,
+                                    bandCenter: game.bandCenter,
+                                    bandHalf: game.bandHalf,
+                                    tension: game.tensionValue)
+                            .padding(.leading, 20)
+                        Spacer()
+                        EffortGauge(effort: game.effortR,
+                                    bandCenter: game.bandCenter,
+                                    bandHalf: game.bandHalf,
+                                    tension: game.tensionValue)
+                            .padding(.trailing, 20)
+                    }
+                    .padding(.bottom, 6)
                 }
             }
         }
@@ -301,6 +342,61 @@ struct EffortGauge: View {
         .frame(width: width, height: height)
         .animation(.linear(duration: 0.08), value: effort)
         .animation(.linear(duration: 0.08), value: bandCenter)
+    }
+}
+
+/// Moments mechanic: how hot you revved the drive — you pay for the red zone after 80m.
+struct BurnMeter: View {
+    let value: Double
+
+    private var color: Color {
+        if value < 0.55 { return Style.good }
+        if value < 0.8 { return Color(red: 1.0, green: 0.62, blue: 0.2) }
+        return Style.bad
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("BURN")
+                .font(.system(size: 10, weight: .heavy))
+                .foregroundStyle(.white.opacity(0.6))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.14)).frame(width: 110, height: 7)
+                // Sweet-spot marker
+                Rectangle().fill(Color.white.opacity(0.5)).frame(width: 1.5, height: 11)
+                    .offset(x: 110 * 0.55)
+                Capsule().fill(color)
+                    .frame(width: max(7, 110 * CGFloat(min(1, value / 1.1))), height: 7)
+                    .animation(.linear(duration: 0.12), value: value)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Style.panel, in: Capsule())
+    }
+}
+
+/// The line is coming: falling chevrons — yank both thumbs down to dip.
+struct LeanCueView: View {
+    @State private var fall = false
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("DIP!")
+                .font(Style.headline(26))
+                .foregroundStyle(Style.gold)
+                .shadow(color: .black.opacity(0.8), radius: 6)
+            ForEach(0..<3, id: \.self) { i in
+                Image(systemName: "chevron.compact.down")
+                    .font(.system(size: 30, weight: .black))
+                    .foregroundStyle(Style.gold.opacity(1 - Double(i) * 0.28))
+            }
+            .offset(y: fall ? 14 : -4)
+        }
+        .onAppear {
+            withAnimation(.easeIn(duration: 0.35).repeatForever(autoreverses: false)) {
+                fall = true
+            }
+        }
     }
 }
 

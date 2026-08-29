@@ -8,6 +8,14 @@ enum TapVerdict: String {
     case falseStart = "FALSE START"
     case relax = "RELAX — EASE OFF"
     case lean = "LEAN!"
+    case surge = "SURGE ✓"
+    case still = "BE STILL"
+}
+
+/// The two player mechanics under A/B evaluation (menu toggle).
+enum SprintMechanic: String {
+    case band       // one thumb rides the choreographed effort band
+    case moments    // drive mash → hands-off flight + timed surges → fade → lean
 }
 
 /// The player's sprint unfolds in three phases (display flavor; the band drives play).
@@ -98,9 +106,24 @@ final class RaceEngine {
     private(set) var clock: Double = 0              // official race clock (0 at gun)
     private(set) var gunFired = false
 
-    // Player effort-band state
-    private var rawEffort: Double = 0.85
-    private(set) var playerEffort: Double = 0.85    // smoothed 0..1
+    /// Active player mechanic (set from the menu; applies from the next race).
+    var mechanic: SprintMechanic = .band
+
+    // Moments-mechanic state (drive mash; from 30m the band takes over)
+    private(set) var burn: Double = 0               // drive-phase rev debt, 0..1.1
+    private var rateEMA: Double = 3.0               // recent drive tap rate (Hz)
+    private var lastDriveTapAt: Double = 0
+
+    // Player effort-band state (two thumbs, one gauge each, same target band)
+    private var rawL: Double = 0.85
+    private var rawR: Double = 0.85
+    private var activeL = false
+    private var activeR = false
+    private(set) var playerEffortL: Double = 0.85   // smoothed, 0..1
+    private(set) var playerEffortR: Double = 0.85
+    private(set) var playerEffort: Double = 0.85    // combined
+    private var prevCombined: Double = 0.85
+    private var dropAccum: Double = 0               // fast both-thumb drop = the dip
     private(set) var tension: Double = 0            // 0..1, builds when over the band
     private(set) var qBar: Double = 0.9             // tracking quality EMA ("FORM")
     private var bandSeed1: Double = 0
@@ -185,8 +208,12 @@ final class RaceEngine {
         clock = 0
         timeSinceGun = 0
         gunFired = false
-        rawEffort = 0.85
+        rawL = 0.85; rawR = 0.85
+        activeL = false; activeR = false
+        playerEffortL = 0.85; playerEffortR = 0.85
         playerEffort = 0.85
+        prevCombined = 0.85
+        dropAccum = 0
         tension = 0
         qBar = 0.9
         bandSeed1 = Double.random(in: 0...(2 * .pi))
@@ -196,6 +223,9 @@ final class RaceEngine {
         stunUntil = 0
         leanExecutedAt = nil
         leanCredit = 0
+        burn = 0
+        rateEMA = 3.0
+        lastDriveTapAt = 0
         phaseTime = 0
     }
 
@@ -228,11 +258,43 @@ final class RaceEngine {
         playerLaunched = true
         player.reaction = falseStarted ? 0.30 : max(0.08, min(timeSinceGun, engineTime))
         player.velocity = tuning.launchImpulse
+        lastDriveTapAt = player.reaction
     }
 
-    /// Continuous effort from the riding thumb (0 = bottom, 1 = top). Smoothed in step.
+    // MARK: Moments-mechanic input
+
+    /// A drive-phase power step. No timing windows: rate is intensity, and intensity
+    /// both accelerates you and accrues burn you pay for after 80m.
+    @discardableResult
+    func momentsDriveTap(engineTime: Double) -> Bool {
+        guard mechanic == .moments, phase == .racing, playerLaunched,
+              player.finishTime == nil, player.distance < 32 else { return false }
+        let now = min(timeSinceGun, max(engineTime, lastDriveTapAt + 0.02))
+        let gap = now - lastDriveTapAt
+        let instR = min(7.0, 1.0 / max(0.08, gap))
+        rateEMA = rateEMA * 0.7 + min(instR, 5.5) * 0.3
+        burn = min(1.1, burn + 0.05 * pow(instR / 4.5, 1.6))
+        // Taps beyond the biomechanical cap waste sharply (mashing self-defeats).
+        let popScale = instR <= 4.8 ? 1.0 : pow(4.8 / instR, 2)
+        player.velocity += 0.42 * popScale * max(0, 1 - player.velocity / 11.2)
+        lastDriveTapAt = now
+        return true
+    }
+
+
+    /// Autopilot / single-source effort: drives both thumbs identically.
     func setPlayerEffort(_ e: Double) {
-        rawEffort = max(0, min(1, e))
+        let v = max(0, min(1, e))
+        rawL = v; rawR = v
+        activeL = true; activeR = true
+    }
+
+    /// Per-thumb effort from the touch layer; nil = that thumb is off the glass.
+    func setPlayerEfforts(left: Double?, right: Double?) {
+        if let l = left { rawL = max(0, min(1, l)) }
+        if let r = right { rawR = max(0, min(1, r)) }
+        activeL = left != nil
+        activeR = right != nil
     }
 
     /// Second thumb planted in the final meters: the dip at the line.
@@ -247,11 +309,15 @@ final class RaceEngine {
         return .lean
     }
 
-    /// Late-race fade; better tracking postpones it.
+    /// Late-race fade. Band: better tracking postpones it. Moments: burn brings it on.
     var currentFatigue: Double {
         let t = timeSinceGun
         guard t > tuning.fatigueOnset else { return 1.0 }
-        let k = tuning.fatigueK * (1.35 - 0.5 * qBar)
+        let k: Double
+        switch mechanic {
+        case .band: k = tuning.fatigueK * (1.35 - 0.5 * qBar)
+        case .moments: k = tuning.fatigueK * (1 + 0.9 * max(0, burn - 0.5))
+        }
         return max(0.90, 1.0 - k * pow(t - tuning.fatigueOnset, 2))
     }
 
@@ -296,8 +362,9 @@ final class RaceEngine {
             }
             r.topSpeed = max(r.topSpeed, r.velocity)
 
-            // Stride phase advance: stride frequency tied to speed.
-            let freq = 0.4 + 2.15 * (r.velocity / 12.0)   // full cycles per second
+            // Stride phase advance. Turnover is frantic from the first step —
+            // block exits are ~4 steps/s, not a jog that speeds up.
+            let freq = 1.7 + 1.1 * (r.velocity / 12.0)    // full cycles per second
             r.stridePhase += Double(freq) * dt * (r.velocity > 0.2 ? 1 : 0)
 
             if r.finishTime == nil {
@@ -347,12 +414,49 @@ final class RaceEngine {
         if falseStarted, timeSinceGun < stunUntil { return }
         guard playerLaunched else { return }
 
-        // Thumb smoothing so touch jitter isn't punished directly.
-        playerEffort += (rawEffort - playerEffort) * min(1, dt * 14)
+        switch mechanic {
+        case .band: stepPlayerBand(r, dt: dt)
+        case .moments: stepPlayerMoments(r, dt: dt)
+        }
+    }
+
+    private func stepPlayerMoments(_ r: RunnerState, dt: Double) {
+        if r.distance < 30 {
+            // Drive: acceleration flows while taps keep landing, scaled by intensity.
+            if timeSinceGun - lastDriveTapAt < 0.45 {
+                let A = 8.5 * min(1.12, max(0.22, rateEMA / 4.4))
+                r.velocity += A * max(0, 1 - r.velocity / 11.2) * dt
+            }
+            r.velocity = max(0, r.velocity)
+            r.distance += r.velocity * dt
+        } else {
+            // From 30m the race becomes the band: grab the gauges and ride it home.
+            // Burn from the drive feeds the fatigue model (see currentFatigue).
+            stepPlayerBand(r, dt: dt)
+        }
+    }
+
+    private func stepPlayerBand(_ r: RunnerState, dt: Double) {
+        // Per-thumb smoothing so touch jitter isn't punished directly.
+        playerEffortL += (rawL - playerEffortL) * min(1, dt * 14)
+        playerEffortR += (rawR - playerEffortR) * min(1, dt * 14)
+        let both = activeL && activeR
+        if both { playerEffort = (playerEffortL + playerEffortR) / 2 }
+        else if activeL { playerEffort = playerEffortL }
+        else if activeR { playerEffort = playerEffortR }
+        // (both thumbs off: effort holds its last value)
+
+        // The dip at the line: both thumbs yanked down fast.
+        let drop = max(0, prevCombined - playerEffort)
+        dropAccum = dropAccum * exp(-dt * 9) + drop
+        prevCombined = playerEffort
+        if r.distance >= tuning.leanZone, leanExecutedAt == nil, dropAccum > 0.20 {
+            _ = executeLean()
+        }
 
         let b = currentBand
         let err = (playerEffort - b.center) / b.half
-        let q: Double
+        var q: Double
         if abs(err) <= 1 {
             q = 1 - 0.25 * err * err
             tension = max(0, tension - dt * 0.25)
@@ -364,6 +468,11 @@ final class RaceEngine {
             // Under the band: relaxed but underpowered.
             q = max(0.30, 1 - 0.42 * (-err - 1))
             tension = max(0, tension - dt * 0.35)
+        }
+        // Run with both arms: thumbs drifting apart costs form.
+        if both {
+            let div = abs(playerEffortL - playerEffortR)
+            q *= 1 - 0.4 * min(1, div / 0.3)
         }
         qBar += (q - qBar) * dt * 1.4
 

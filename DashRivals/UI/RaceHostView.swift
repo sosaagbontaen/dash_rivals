@@ -40,12 +40,15 @@ final class TouchSCNView: SCNView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { gameController?.touch(side: side(of: t), isDown: true, hostTime: t.timestamp) }
+        for t in touches {
+            gameController?.touch(side: side(of: t), isDown: true, hostTime: t.timestamp)
+            gameController?.effortInput(side: side(of: t), value: effort(of: t))
+        }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // The riding thumb: its vertical position is the effort input.
-        if let t = touches.first { gameController?.effortInput(effort(of: t)) }
+        // Each riding thumb: vertical position is that side's effort input.
+        for t in touches { gameController?.effortInput(side: side(of: t), value: effort(of: t)) }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
