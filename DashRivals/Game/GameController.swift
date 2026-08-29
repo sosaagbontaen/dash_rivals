@@ -60,8 +60,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     @Published var leanCue = false
     @Published var effortL: Double = 0.85
     @Published var effortR: Double = 0.85
-    @Published var stickAngleL: Double = -1.2   // radians; knob rendering
+    @Published var stickAngleL: Double = -1.2   // radians; knob rendering (view space)
     @Published var stickAngleR: Double = -1.9
+    @Published var targetAngle: Double = -Double.pi / 2   // canonical; HUD mirrors for left
     // Broadcast replay
     @Published var replayActive = false
     @Published var windText = "+0.0"
@@ -130,6 +131,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         return 0.9
     }
     private var apNoise: Double = 0
+    private var apNoise2: Double = 0
     private var nextAutoTap: Double = 0
 
     override init() {
@@ -447,10 +449,18 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             }
         }
 
-        // Feed both thumbs to the band model (also drives the moments hybrid past 30m).
+        // Feed both thumb sticks to the tracking model (canonical space: the left
+        // stick's angle is mirrored so outward reads the same on both sides).
         if engine.phase == .racing, engine.playerLaunched {
-            engine.setPlayerEfforts(left: heldSides.contains(false) ? effL : nil,
-                                    right: heldSides.contains(true) ? effR : nil)
+            var left: (effort: Double, angle: Double)? = nil
+            var right: (effort: Double, angle: Double)? = nil
+            if heldSides.contains(false), let e = effL {
+                left = (e, Double.pi - (angL ?? -Double.pi / 2))
+            }
+            if heldSides.contains(true), let e = effR {
+                right = (e, angR ?? -Double.pi / 2)
+            }
+            engine.setPlayerSticks(left: left, right: right)
         }
 
         // Lean feedback (the dip can be triggered inside the engine or by autopilot).
@@ -693,16 +703,23 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                     nextAutoTap = engine.timeSinceGun + (1 / rate) * (1 + gaussianRand() * 0.08)
                 }
             } else {
-                // Track the band like a human: lag, smoothed noise, over-press bias.
+                // Track the yellow dot like a human: lag, smoothed 2D noise, over-press bias.
                 let q = autoQuality
                 let sd = 0.008 + (1 - q) * 0.15
                 let lag = 0.06 + (1 - q) * 0.5
                 let bias = (1 - q) * 0.12
                 apNoise += -6 * apNoise * dt + sd * (12 * dt).squareRoot() * gaussianRand()
+                apNoise2 += -6 * apNoise2 * dt + sd * (12 * dt).squareRoot() * gaussianRand()
                 let p = engine.player
                 let laggedD = max(0, p.distance - p.velocity * lag)
                 let target = engine.band(atDistance: laggedD, time: engine.timeSinceGun - lag)
-                engine.setPlayerEffort(target.center + apNoise + bias)
+                let angle = engine.targetAngle(time: engine.timeSinceGun - lag, distance: laggedD)
+                    + apNoise2 * 0.5
+                engine.setAutoStick(effort: target.center + apNoise + bias, angle: angle)
+                publish {
+                    $0.stickAngleL = Double.pi - angle
+                    $0.stickAngleR = angle
+                }
             }
         case .results:
             if !autopilotOnce, phaseTime > 6 { publish { $0.runAgain() }; phaseTime = 0 }
@@ -820,6 +837,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             let racing = engine.phase == .racing && engine.playerLaunched
             let phaseStr: String? = racing ? engine.sprintPhase.rawValue : nil
             let band = engine.currentBand
+            let discTol = engine.discTolerance
+            let tAngle = engine.targetAngle(time: engine.timeSinceGun, distance: engine.player.distance)
             let effort = engine.playerEffort
             let tension = engine.tension
             let form = engine.qBar
@@ -839,7 +858,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 $0.effortL = effL
                 $0.effortR = effR
                 $0.bandCenter = band.center
-                $0.bandHalf = band.half
+                $0.bandHalf = discTol
+                $0.targetAngle = tAngle
                 $0.tensionValue = tension
                 $0.burnValue = burnV
                 if $0.gaugeVisible != gauge { $0.gaugeVisible = gauge }

@@ -311,15 +311,17 @@ struct RaceHUD: View {
                     HStack {
                         EffortGauge(effort: game.effortL,
                                     angle: game.stickAngleL,
-                                    bandCenter: game.bandCenter,
-                                    bandHalf: game.bandHalf,
+                                    targetRadius: game.bandCenter,
+                                    targetTol: game.bandHalf,
+                                    targetAngle: Double.pi - game.targetAngle,
                                     tension: game.tensionValue)
                             .padding(.leading, 14)
                         Spacer()
                         EffortGauge(effort: game.effortR,
                                     angle: game.stickAngleR,
-                                    bandCenter: game.bandCenter,
-                                    bandHalf: game.bandHalf,
+                                    targetRadius: game.bandCenter,
+                                    targetTol: game.bandHalf,
+                                    targetAngle: game.targetAngle,
                                     tension: game.tensionValue)
                             .padding(.trailing, 14)
                     }
@@ -333,29 +335,35 @@ struct RaceHUD: View {
     }
 }
 
-/// Joystick effort gauge — the linear band bent into a circle. The fat gold
-/// donut is the moving target area; the white knob sits exactly under your
-/// thumb (touch mapping is 1:1 with this geometry). Keep the knob in the gold.
-/// Knob turns red the moment it leaves the band; red rim = tension building.
+/// Joystick pursuit gauge — the linear-band tracking made 2D. A filled yellow
+/// dot wanders around the pad; chase it with your thumb (the white knob, drawn
+/// 1:1 under your finger). Knob turns red the moment it slips off the dot;
+/// red rim = tension building from overpushing.
 struct EffortGauge: View {
     let effort: Double
-    let angle: Double        // radians, thumb's direction on the stick
-    let bandCenter: Double
-    let bandHalf: Double
+    let angle: Double        // radians, thumb's direction (view space)
+    let targetRadius: Double // dot's distance from center, effort units
+    let targetTol: Double    // dot's radius, effort units
+    let targetAngle: Double  // radians, dot's direction (view space)
     let tension: Double
 
     private let size: CGFloat = 190
     private let deadR: CGFloat = 9
+    private let usable: CGFloat = 82   // must match TouchSCNView mapping
 
     private func r(_ value: Double) -> CGFloat {
-        deadR + (size / 2 - 4 - deadR) * CGFloat(min(1, max(0, value)))
+        deadR + usable * CGFloat(min(1, max(0, value)))
     }
 
-    private var inBand: Bool {
-        abs(effort - bandCenter) <= bandHalf
+    private var onTarget: Bool {
+        let kx = effort * cos(angle), ky = effort * sin(angle)
+        let tx = targetRadius * cos(targetAngle), ty = targetRadius * sin(targetAngle)
+        return ((kx - tx) * (kx - tx) + (ky - ty) * (ky - ty)).squareRoot() <= targetTol
     }
 
     var body: some View {
+        // Honest size: the drawn dot IS the scoring tolerance (+ a hair of grace).
+        let discR = CGFloat(targetTol) * usable + 4
         ZStack {
             // Stick base
             Circle()
@@ -365,21 +373,17 @@ struct EffortGauge: View {
                                                         : Color.white.opacity(0.16),
                                           lineWidth: tension > 0.4 ? 2.5 : 1)
                 )
-            Circle().fill(Color.white.opacity(0.25)).frame(width: 8, height: 8)
-            // Target area: a filled gold donut — keep the knob inside it.
+            Circle().fill(Color.white.opacity(0.22)).frame(width: 8, height: 8)
+            // The target: a filled yellow dot on the move — keep your thumb on it.
             Circle()
-                .stroke(Style.gold.opacity(inBand ? 0.55 : 0.42),
-                        lineWidth: max(10, (r(bandCenter + bandHalf) - r(bandCenter - bandHalf))))
-                .frame(width: r(bandCenter) * 2, height: r(bandCenter) * 2)
+                .fill(Style.gold.opacity(onTarget ? 0.85 : 0.6))
+                .overlay(Circle().strokeBorder(Style.gold, lineWidth: 2))
+                .frame(width: discR * 2, height: discR * 2)
+                .offset(x: cos(targetAngle) * r(targetRadius),
+                        y: sin(targetAngle) * r(targetRadius))
+            // The knob: your thumb. White on the dot, red off it.
             Circle()
-                .stroke(Style.gold.opacity(0.95), lineWidth: 1.4)
-                .frame(width: r(bandCenter + bandHalf) * 2, height: r(bandCenter + bandHalf) * 2)
-            Circle()
-                .stroke(Style.gold.opacity(0.95), lineWidth: 1.4)
-                .frame(width: r(bandCenter - bandHalf) * 2, height: r(bandCenter - bandHalf) * 2)
-            // The knob: your thumb. White in the band, red off it.
-            Circle()
-                .fill(inBand ? Color.white : Style.bad)
+                .fill(onTarget ? Color.white : Style.bad)
                 .overlay(Circle().strokeBorder(Color.black.opacity(0.35), lineWidth: 1))
                 .frame(width: 26, height: 26)
                 .shadow(color: .black.opacity(0.7), radius: 3)
@@ -387,7 +391,8 @@ struct EffortGauge: View {
         }
         .frame(width: size, height: size)
         .animation(.linear(duration: 0.08), value: effort)
-        .animation(.linear(duration: 0.08), value: bandCenter)
+        .animation(.linear(duration: 0.08), value: targetRadius)
+        .animation(.linear(duration: 0.08), value: targetAngle)
     }
 }
 

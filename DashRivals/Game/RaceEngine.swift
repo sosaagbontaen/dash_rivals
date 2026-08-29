@@ -117,20 +117,28 @@ final class RaceEngine {
     private var rateEMA: Double = 3.0               // recent drive tap rate (Hz)
     private var lastDriveTapAt: Double = 0
 
-    // Player effort-band state (two thumbs, one gauge each, same target band)
+    // Player stick state: the target is a wandering point on the pad (radius follows
+    // the sprint arc; angle drifts); the player chases it with both thumbs.
+    // Canonical space = right-stick view space (+x outward, -y up); left is mirrored.
     private var rawL: Double = 0.85
     private var rawR: Double = 0.85
+    private var rawAngL: Double = -Double.pi / 2
+    private var rawAngR: Double = -Double.pi / 2
     private var activeL = false
     private var activeR = false
-    private(set) var playerEffortL: Double = 0.85   // smoothed, 0..1
+    private(set) var playerEffortL: Double = 0.85   // radial, for HUD knobs
     private(set) var playerEffortR: Double = 0.85
-    private(set) var playerEffort: Double = 0.85    // combined
+    private(set) var playerEffort: Double = 0.85    // combined radial (dip detection)
+    private var smoothX: Double = 0                 // smoothed combined thumb point
+    private var smoothY: Double = -0.85
     private var prevCombined: Double = 0.85
     private var dropAccum: Double = 0               // fast both-thumb drop = the dip
-    private(set) var tension: Double = 0            // 0..1, builds when over the band
+    private(set) var tension: Double = 0            // 0..1, builds when overpushing
     private(set) var qBar: Double = 0.9             // tracking quality EMA ("FORM")
     private var bandSeed1: Double = 0
     private var bandSeed2: Double = 0
+    private var angleSeedA: Double = 0
+    private var angleSeedB: Double = 0
 
     private(set) var playerLaunched = false
     private(set) var falseStarted = false
@@ -182,6 +190,21 @@ final class RaceEngine {
         band(atDistance: player.distance, time: timeSinceGun)
     }
 
+    /// The target's angular wander on the pad (canonical space, -π/2 = straight up).
+    /// Nearly steady in the drive; swings wider as the race wears on.
+    func targetAngle(time t: Double, distance d: Double) -> Double {
+        let amp: Double = d < 42 ? 0.35 : (d < 80 ? 0.7 : 1.0)
+        return -Double.pi / 2 + amp * (0.85 * sin(2 * .pi * 0.20 * t + angleSeedA)
+                                     + 0.45 * sin(2 * .pi * 0.115 * t + angleSeedB))
+    }
+
+    /// The yellow dot's radius (in effort units). Kept thumb-sized and honest:
+    /// the drawn dot IS the scoring tolerance; the skill gradient lives inside it
+    /// (dead center = perfect, edge = merely okay).
+    var discTolerance: Double {
+        currentBand.half * 1.35 + 0.10
+    }
+
     // MARK: Race lifecycle
 
     func loadField() {
@@ -212,15 +235,19 @@ final class RaceEngine {
         timeSinceGun = 0
         gunFired = false
         rawL = 0.85; rawR = 0.85
+        rawAngL = -Double.pi / 2; rawAngR = -Double.pi / 2
         activeL = false; activeR = false
         playerEffortL = 0.85; playerEffortR = 0.85
         playerEffort = 0.85
+        smoothX = 0; smoothY = -0.85
         prevCombined = 0.85
         dropAccum = 0
         tension = 0
         qBar = 0.9
         bandSeed1 = Double.random(in: 0...(2 * .pi))
         bandSeed2 = Double.random(in: 0...(2 * .pi))
+        angleSeedA = Double.random(in: 0...(2 * .pi))
+        angleSeedB = Double.random(in: 0...(2 * .pi))
         playerLaunched = false
         falseStarted = false
         stunUntil = 0
@@ -286,17 +313,20 @@ final class RaceEngine {
     }
 
 
-    /// Autopilot / single-source effort: drives both thumbs identically.
-    func setPlayerEffort(_ e: Double) {
-        let v = max(0, min(1, e))
+    /// Autopilot: both thumbs on the same canonical point.
+    func setAutoStick(effort: Double, angle: Double) {
+        let v = max(0, min(1, effort))
         rawL = v; rawR = v
+        rawAngL = angle; rawAngR = angle
         activeL = true; activeR = true
     }
 
-    /// Per-thumb effort from the touch layer; nil = that thumb is off the glass.
-    func setPlayerEfforts(left: Double?, right: Double?) {
-        if let l = left { rawL = max(0, min(1, l)) }
-        if let r = right { rawR = max(0, min(1, r)) }
+    /// Per-thumb stick state from the touch layer (canonical angles);
+    /// nil = that thumb is off the glass.
+    func setPlayerSticks(left: (effort: Double, angle: Double)?,
+                         right: (effort: Double, angle: Double)?) {
+        if let l = left { rawL = max(0, min(1, l.effort)); rawAngL = l.angle }
+        if let r = right { rawR = max(0, min(1, r.effort)); rawAngR = r.angle }
         activeL = left != nil
         activeR = right != nil
     }
@@ -441,16 +471,25 @@ final class RaceEngine {
     }
 
     private func stepPlayerBand(_ r: RunnerState, dt: Double) {
-        // Per-thumb smoothing so touch jitter isn't punished directly.
+        // Per-thumb radial smoothing (HUD knobs read these).
         playerEffortL += (rawL - playerEffortL) * min(1, dt * 14)
         playerEffortR += (rawR - playerEffortR) * min(1, dt * 14)
         let both = activeL && activeR
-        if both { playerEffort = (playerEffortL + playerEffortR) / 2 }
-        else if activeL { playerEffort = playerEffortL }
-        else if activeR { playerEffort = playerEffortR }
-        // (both thumbs off: effort holds its last value)
 
-        // The dip at the line: both thumbs yanked down fast.
+        // Combined thumb point in canonical space, smoothed so jitter isn't punished.
+        var cx = smoothX, cy = smoothY
+        var n = 0.0
+        if activeL || activeR {
+            cx = 0; cy = 0
+            if activeL { cx += rawL * cos(rawAngL); cy += rawL * sin(rawAngL); n += 1 }
+            if activeR { cx += rawR * cos(rawAngR); cy += rawR * sin(rawAngR); n += 1 }
+            cx /= n; cy /= n
+        }
+        smoothX += (cx - smoothX) * min(1, dt * 14)
+        smoothY += (cy - smoothY) * min(1, dt * 14)
+        playerEffort = min(1, (smoothX * smoothX + smoothY * smoothY).squareRoot())
+
+        // The dip at the line: both thumbs yanked down fast (radial collapse).
         let drop = max(0, prevCombined - playerEffort)
         dropAccum = dropAccum * exp(-dt * 9) + drop
         prevCombined = playerEffort
@@ -458,25 +497,31 @@ final class RaceEngine {
             _ = executeLean()
         }
 
+        // Chase the yellow dot: 2D distance to the wandering target, in dot-radius units.
         let b = currentBand
-        let err = (playerEffort - b.center) / b.half
+        let tA = targetAngle(time: timeSinceGun, distance: r.distance)
+        let tol = discTolerance
+        let tx = b.center * cos(tA), ty = b.center * sin(tA)
+        let err = ((smoothX - tx) * (smoothX - tx) + (smoothY - ty) * (smoothY - ty)).squareRoot() / tol
         var q: Double
-        if abs(err) <= 1 {
-            q = 1 - 0.25 * err * err
+        if err <= 1 {
+            // On the dot: the closer to its center, the faster you go.
+            q = 1 - 0.35 * err * err
             tension = max(0, tension - dt * 0.25)
-        } else if err > 1 {
-            // Over the band: still driving, but tightening up.
-            q = max(0.45, 1 - 0.35 * (err - 1))
-            tension = min(1, tension + dt * min(2.5, (err - 1) * 1.6))
         } else {
-            // Under the band: relaxed but underpowered.
-            q = max(0.30, 1 - 0.42 * (-err - 1))
-            tension = max(0, tension - dt * 0.35)
+            q = max(0.30, 1 - 0.5 * (err - 1))
+            // Pushing out past the dot = tightening up; trailing it is just underpowered.
+            if playerEffort > b.center + tol {
+                tension = min(1, tension + dt * min(2.5, (err - 1) * 1.4))
+            } else {
+                tension = max(0, tension - dt * 0.30)
+            }
         }
         // Run with both arms: thumbs drifting apart costs form.
         if both {
-            let div = abs(playerEffortL - playerEffortR)
-            q *= 1 - 0.4 * min(1, div / 0.3)
+            let dx = rawL * cos(rawAngL) - rawR * cos(rawAngR)
+            let dy = rawL * sin(rawAngL) - rawR * sin(rawAngR)
+            q *= 1 - 0.35 * min(1, (dx * dx + dy * dy).squareRoot() / 0.35)
         }
         qBar += (q - qBar) * dt * 1.4
 
