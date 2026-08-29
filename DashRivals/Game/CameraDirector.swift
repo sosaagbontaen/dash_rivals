@@ -14,6 +14,8 @@ final class CameraDirector {
     private var smoothLook = SIMD3<Float>(5, 1, 20)
     private var smoothFov: Float = 62
     private var orbitAngle: Float = .pi
+    private var fovKick: Float = 0          // transient widening (top-gear bloom)
+    private var streaks: SCNParticleSystem!
 
     init() {
         camera.zNear = 0.1
@@ -26,13 +28,49 @@ final class CameraDirector {
         camera.motionBlurIntensity = 0.55
         camera.vignettingIntensity = 0.75
         camera.vignettingPower = 0.85
+        camera.colorFringeStrength = 0.8
+        camera.colorFringeIntensity = 0
         camera.exposureOffset = 0.15
         node.camera = camera
         node.position = SCNVector3(smoothPos)
+        buildStreaks()
+    }
+
+    /// Wind streaks whipping past the lens at speed.
+    private func buildStreaks() {
+        streaks = SCNParticleSystem()
+        streaks.emitterShape = SCNBox(width: 7, height: 4.5, length: 0.5, chamferRadius: 0)
+        streaks.birthLocation = .volume
+        streaks.emittingDirection = SCNVector3(0, 0, 1)   // toward the camera
+        streaks.particleVelocity = 30
+        streaks.particleVelocityVariation = 8
+        streaks.particleLifeSpan = 0.4
+        streaks.particleSize = 0.02
+        streaks.stretchFactor = 0.12
+        streaks.particleColor = UIColor(white: 1, alpha: 0.30)
+        streaks.particleColorVariation = SCNVector4(0, 0, 0, 0.12)
+        streaks.blendMode = .additive
+        streaks.birthRate = 0
+        let emitter = SCNNode()
+        emitter.position = SCNVector3(0, 0, -9)
+        emitter.addParticleSystem(streaks)
+        node.addChildNode(emitter)
     }
 
     func impulse(_ amount: Float) {
         shake = min(1.2, shake + amount)
+    }
+
+    /// The "hit top gear" moment: a transient FOV bloom that settles back.
+    func topGearBloom() {
+        fovKick = 11
+    }
+
+    /// Drive the streak density from player speed (m/s).
+    func setStreakSpeed(_ v: Float) {
+        let n = max(0, (v - 7.5) / 4)
+        streaks.birthRate = CGFloat(min(1.4, n)) * 210
+        streaks.particleVelocity = CGFloat(18 + v * 1.6)
     }
 
     /// - Parameters:
@@ -73,14 +111,18 @@ final class CameraDirector {
             stiffness = 3.2
 
         case .chase:
-            // The core camera: low, tight, widening with speed.
+            // The core camera: in the tunnel during the drive (low, tight, narrow),
+            // blooming out into full flight at speed.
             let sp = min(1, v / 12)
+            let spE = sp * sp * (3 - 2 * sp)   // eased
             let sway = sin(phase * 2 * .pi * 2) * 0.05 * sp
             let bob = sin(phase * 2 * .pi * 2 + 1.3) * 0.03 * sp
-            targetPos = SIMD3(playerX + sway, 1.52 - sp * 0.16 + bob, playerZ - 2.75 + sp * 0.2)
-            targetLook = SIMD3(playerX, 1.15, playerZ + 7)
-            targetFov = 57 + sp * 16
+            targetPos = SIMD3(playerX + sway, 1.46 - spE * 0.10 + bob, playerZ - 2.45 - spE * 0.55)
+            targetLook = SIMD3(playerX, 1.12, playerZ + 6.5 + spE * 2.5)
+            targetFov = 54 + spE * 21 + fovKick
             stiffness = 14
+            // Rumble out of the blocks; smooths out as flight settles in.
+            shake = max(shake, 0.10 * (1 - spE))
 
         case .orbit:
             orbitAngle += Float(dt) * 0.35
@@ -97,8 +139,9 @@ final class CameraDirector {
         smoothLook += (targetLook - smoothLook) * k
         smoothFov += (targetFov - smoothFov) * min(1, Float(dt) * 6)
 
-        // Shake (gun, stumble) decays quickly.
+        // Shake (gun, stumble) decays quickly; FOV bloom settles back.
         shake *= exp(-Float(dt) * 6.5)
+        fovKick *= exp(-Float(dt) * 3.2)
         let sx = sin(t * 39) * shake * 0.05
         let sy = cos(t * 47) * shake * 0.04
 
@@ -108,8 +151,11 @@ final class CameraDirector {
         node.simdEulerAngles.z += sin(t * 31) * shake * 0.02
         camera.fieldOfView = CGFloat(smoothFov)
 
-        // Motion blur only matters at speed; keep menus crisp.
-        camera.motionBlurIntensity = mode == .chase ? CGFloat(0.4 + 0.35 * min(1, v / 12)) : 0.1
+        // Motion blur and chromatic fringe only matter at speed; keep menus crisp.
+        let sp = CGFloat(min(1, v / 12))
+        camera.motionBlurIntensity = mode == .chase ? 0.4 + 0.45 * sp : 0.1
+        camera.colorFringeIntensity = mode == .chase ? sp * 1.1 : 0
+        camera.vignettingIntensity = mode == .chase ? 0.75 + 0.25 * sp : 0.75
     }
 
     /// Reset smoothing when jumping between distant shots to avoid a long swoop.

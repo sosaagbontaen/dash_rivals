@@ -83,9 +83,16 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     private var sideDownAt: [Bool: Double] = [:]   // engine time each side last went down
 
     // Haptics
+    private let haptics = Haptics()
     private let tapHaptic = UIImpactFeedbackGenerator(style: .light)
     private let heavyHaptic = UIImpactFeedbackGenerator(style: .heavy)
     private let successHaptic = UINotificationFeedbackGenerator()
+
+    // Cinematic time scale (slow-mo launch & photo-finish)
+    private var timeScale = 1.0
+    private var heldScale = 0.45
+    private var slowMoHoldUntil: Double = -1
+    private var lastSprintPhase: SprintPhaseKind = .drive
 
     // Autopilot (DEBUG tuning aid): launch with -autopilot [-apq 0.9] [-aponce]
     private let autopilot = CommandLine.arguments.contains("-autopilot")
@@ -138,6 +145,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             strideCounters = [Int](repeating: 0, count: 8)
             playerFinishedAt = nil
             celebrationAt = nil
+            nextPantAt = 0
             engine.setPhase(.intro)
             phaseTime = 0
             cameraDirector.mode = .intro
@@ -159,6 +167,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             strideCounters = [Int](repeating: 0, count: 8)
             playerFinishedAt = nil
             celebrationAt = nil
+            nextPantAt = 0
             engine.setPhase(.marks)
             phaseTime = 0
             cameraDirector.mode = .set
@@ -231,8 +240,11 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         processInputs()
         runAutopilot(dt: dt)
 
-        let events = engine.update(dt: dt)
+        // Slow-mo choreography: the launch and the final meters stretch out.
+        timeScale += (currentTimeScaleTarget() - timeScale) * min(1, dt * 8)
+        let events = engine.update(dt: dt * timeScale)
         handle(events: events)
+        updateSpectacle()
         updatePhaseLogic(dt: dt)
         updateFigures(dt: dt)
         updateCamera(dt: dt)
@@ -270,7 +282,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                     audio.playHeartbeat()
                     audio.crowdTarget = 0.08   // the stadium holds its breath
                     publish { $0.uiPhase = .set }
-                    DispatchQueue.main.async { self.heavyHaptic.impactOccurred(intensity: 0.6) }
+                    haptics.setCrouch()
                 }
             case .set:
                 engine.playerFalseStart()
@@ -280,7 +292,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                     // First movement after the gun — usually the thumb lift.
                     engine.playerLaunch(engineTime: engineT)
                     publish { $0.gaugeVisible = true }
-                    DispatchQueue.main.async { self.tapHaptic.impactOccurred(intensity: 0.8) }
+                    haptics.launch()
                 } else if isDown {
                     // Second thumb planted in the final meters = the lean.
                     let opposite = side == .left
@@ -290,13 +302,41 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                        let v = engine.executeLean() {
                         publish { $0.verdictFlash = VerdictFlash(text: v.rawValue, good: true) }
                         playerLeanUntil = sceneTime + 0.55
-                        DispatchQueue.main.async { self.heavyHaptic.impactOccurred() }
+                        haptics.lean()
                     }
                 }
                 if isDown { sideDownAt[side == .right] = engineT }
             default:
                 break
             }
+        }
+    }
+
+    private func currentTimeScaleTarget() -> Double {
+        if sceneTime < slowMoHoldUntil { return heldScale }
+        if engine.phase == .racing, engine.playerLaunched, engine.player.finishTime == nil,
+           engine.player.distance > 96.5 {
+            return 0.45   // the line approaches in super slow motion
+        }
+        return 1.0
+    }
+
+    /// One-shot spectacle moments driven by race state.
+    private func updateSpectacle() {
+        if engine.phase == .racing, engine.playerLaunched {
+            let sp = engine.sprintPhase
+            if sp != lastSprintPhase {
+                if sp == .maxVelocity {
+                    // Hitting top gear: FOV blooms, the air starts to howl.
+                    cameraDirector.topGearBloom()
+                    audio.playWhoosh()
+                    haptics.topGear()
+                    publish { $0.verdictFlash = VerdictFlash(text: "FULL FLIGHT", good: true) }
+                }
+                lastSprintPhase = sp
+            }
+        } else if engine.phase != .finished {
+            lastSprintPhase = .drive
         }
     }
 
@@ -317,12 +357,16 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             audio.crowdTarget = 0.65
             cameraDirector.impulse(0.55)
             cameraDirector.mode = .chase
+            haptics.gun()
+            // The launch stretches out for a beat before time catches up.
+            timeScale = 0.35
+            heldScale = 0.5
+            slowMoHoldUntil = sceneTime + 0.45
             publish {
                 $0.uiPhase = .racing
                 $0.gunFlash = true
             }
             DispatchQueue.main.async {
-                self.heavyHaptic.impactOccurred()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.gunFlash = false }
             }
         }
@@ -340,13 +384,18 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         if engine.phase == .racing, engine.tension > 0.55, sceneTime - lastRelaxFlashAt > 2.5 {
             lastRelaxFlashAt = sceneTime
             publish { $0.verdictFlash = VerdictFlash(text: TapVerdict.relax.rawValue, good: false) }
-            DispatchQueue.main.async { self.tapHaptic.impactOccurred(intensity: 0.5) }
+            haptics.tensionTick()
         }
 
         for r in events.runnersJustFinished where r.athlete.isPlayer {
             playerFinishedAt = phaseTime
             audio.playCheer()
             audio.crowdTarget = 0.95
+            cameraDirector.impulse(0.7)
+            haptics.finishBurst()
+            // Hold the super-slow-mo through the line, then let time snap back.
+            heldScale = 0.4
+            slowMoHoldUntil = sceneTime + 0.55
             publish { $0.finishFlash = true; $0.gaugeVisible = false }
             DispatchQueue.main.async {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { self.finishFlash = false }
@@ -528,18 +577,31 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             fig.update(phase: r.stridePhase, speed: r.velocity, lean: r.velocity > 0.2 ? lean : 0.1,
                        time: sceneTime)
 
-            // Footstep audio: two steps per stride cycle.
+            // Footstep audio + haptic: two steps per stride cycle.
             let stepCount = Int(r.stridePhase * 2)
             if stepCount > strideCounters[i], r.velocity > 1 {
                 strideCounters[i] = stepCount
                 if r.athlete.isPlayer {
                     audio.playFootstep(loud: true)
+                    haptics.footstep(speedFactor: Float(min(1, r.velocity / 12)))
+                    // Breathe out every second stride cycle, harder as the race wears on.
+                    if stepCount % 4 == 0, r.distance > 15, r.finishTime == nil {
+                        let strain = Float(min(1, engine.timeSinceGun / 10))
+                        audio.playBreath(volume: 0.25 + 0.5 * strain)
+                    }
                 } else if abs(r.distance - engine.player.distance) < 6, i % 2 == 0 {
                     audio.playFootstep(loud: false)
                 }
             }
         }
+
+        // Heavy panting after the line while the player recovers.
+        if let fin = playerFinishedAt, phaseTime - fin < 4.0, phaseTime > nextPantAt {
+            nextPantAt = phaseTime + 0.55
+            audio.playBreath(volume: 0.85)
+        }
     }
+    private var nextPantAt: Double = 0
 
     private func updateCamera(dt: Double) {
         let p = engine.player
@@ -548,6 +610,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                               playerZ: Float(p.distance) - 0.35,
                               v: Float(p.velocity),
                               phase: Float(p.stridePhase))
+        let racingish = engine.phase == .racing || engine.phase == .finished
+        audio.windTarget = racingish ? Float(min(1, p.velocity / 12)) * 0.55 : 0
+        cameraDirector.setStreakSpeed(racingish ? Float(p.velocity) : 0)
     }
 
     private func updateScoreboardAndHUD(dt: Double) {

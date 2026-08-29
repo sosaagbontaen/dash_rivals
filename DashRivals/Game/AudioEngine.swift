@@ -4,11 +4,14 @@ import AVFoundation
 final class GameAudio {
     private let engine = AVAudioEngine()
     private let crowdPlayer = AVAudioPlayerNode()
+    private let windPlayer = AVAudioPlayerNode()
     private let sfxPlayers = (0..<5).map { _ in AVAudioPlayerNode() }
     private var sfxIndex = 0
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
 
     private var crowdLoop: AVAudioPCMBuffer!
+    private var windLoop: AVAudioPCMBuffer!
+    private var whoosh: AVAudioPCMBuffer!
     private var gun: AVAudioPCMBuffer!
     private var setBeep: AVAudioPCMBuffer!
     private var steps: [AVAudioPCMBuffer] = []
@@ -16,13 +19,18 @@ final class GameAudio {
     private var tick: AVAudioPCMBuffer!
     private var pbJingle: AVAudioPCMBuffer!
     private var heartbeat: AVAudioPCMBuffer!
+    private var breaths: [AVAudioPCMBuffer] = []
 
     /// Crowd volume target; ramped smoothly in update().
     var crowdTarget: Float = 0.4
+    /// Wind-rush volume target (scaled with player speed); ramped in update().
+    var windTarget: Float = 0
     private var started = false
 
     init() {
         crowdLoop = Synth.crowd(seconds: 7, format: format)
+        windLoop = Synth.wind(seconds: 5, format: format)
+        whoosh = Synth.whoosh(format: format)
         gun = Synth.gunshot(format: format)
         setBeep = Synth.tone(freq: 700, seconds: 0.5, attack: 0.01, decay: 2.2, gain: 0.35, format: format)
         steps = (0..<3).map { i in Synth.footstep(pitch: 1.0 + Float(i) * 0.12 - 0.12, format: format) }
@@ -30,6 +38,7 @@ final class GameAudio {
         tick = Synth.tone(freq: 1250, seconds: 0.06, attack: 0.002, decay: 28, gain: 0.18, format: format)
         pbJingle = Synth.jingle(format: format)
         heartbeat = Synth.heartbeat(format: format)
+        breaths = (0..<3).map { i in Synth.breath(pitch: 0.9 + Float(i) * 0.12, format: format) }
 
         // .playback so game audio plays even with the ringer/silent switch on
         // (.ambient goes silent on a muted phone — the simulator ignores the switch,
@@ -39,6 +48,8 @@ final class GameAudio {
 
         engine.attach(crowdPlayer)
         engine.connect(crowdPlayer, to: engine.mainMixerNode, format: format)
+        engine.attach(windPlayer)
+        engine.connect(windPlayer, to: engine.mainMixerNode, format: format)
         for p in sfxPlayers {
             engine.attach(p)
             engine.connect(p, to: engine.mainMixerNode, format: format)
@@ -52,6 +63,9 @@ final class GameAudio {
             crowdPlayer.volume = 0.35
             crowdPlayer.scheduleBuffer(crowdLoop, at: nil, options: .loops)
             crowdPlayer.play()
+            windPlayer.volume = 0
+            windPlayer.scheduleBuffer(windLoop, at: nil, options: .loops)
+            windPlayer.play()
             started = true
         } catch {
             // Audio is atmosphere, not critical — run silent if the engine fails.
@@ -60,10 +74,15 @@ final class GameAudio {
 
     func update(dt: Double) {
         guard started else { return }
-        let cur = crowdPlayer.volume
         let step = Float(dt) * 1.2
+        let cur = crowdPlayer.volume
         if abs(cur - crowdTarget) > 0.005 {
             crowdPlayer.volume = cur + max(-step, min(step, crowdTarget - cur))
+        }
+        let wStep = Float(dt) * 2.0
+        let wCur = windPlayer.volume
+        if abs(wCur - windTarget) > 0.005 {
+            windPlayer.volume = wCur + max(-wStep, min(wStep, windTarget - wCur))
         }
     }
 
@@ -77,8 +96,10 @@ final class GameAudio {
     }
 
     func playGun() { playSFX(gun, volume: 1.0) }
+    func playWhoosh() { playSFX(whoosh, volume: 0.65) }
     func playSetBeep() { playSFX(setBeep, volume: 0.8) }
-    func playFootstep(loud: Bool) { playSFX(steps.randomElement()!, volume: loud ? 0.5 : 0.16) }
+    func playFootstep(loud: Bool) { playSFX(steps.randomElement()!, volume: loud ? 0.85 : 0.22) }
+    func playBreath(volume: Float) { playSFX(breaths.randomElement()!, volume: volume) }
     func playCheer() { playSFX(cheer, volume: 0.95) }
     func playTick() { playSFX(tick, volume: 0.7) }
     func playPB() { playSFX(pbJingle, volume: 0.9) }
@@ -104,7 +125,91 @@ private enum Synth {
         }
     }
 
+    /// Stadium crowd: a chorus of slowly-wandering "voice" partials in the vocal band,
+    /// a resonant murmur bed, and sporadic distant claps/shouts — not just hissy noise.
     static func crowd(seconds: Double, format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let buf = buffer(seconds: seconds, format: format)
+        let n = Int(buf.frameLength)
+        let sr = Float(format.sampleRate)
+
+        struct Voice {
+            var freq: Float
+            var phase: Float
+            var amp: Float
+            var ampTarget: Float
+            var pan: Float
+        }
+        var voices: [Voice] = (0..<34).map { _ in
+            Voice(freq: Float.random(in: 130...750) * (Bool.random() ? 1 : 1.5),
+                  phase: .random(in: 0...(2 * .pi)),
+                  amp: .random(in: 0.1...0.5), ampTarget: .random(in: 0.1...0.6),
+                  pan: .random(in: 0...1))
+        }
+        // Distant claps/shouts: (start frame, length, pan, brightness)
+        let events: [(Int, Int, Float, Float)] = (0..<26).map { _ in
+            (Int.random(in: 0..<n), Int(sr * .random(in: 0.02...0.06)),
+             Float.random(in: 0...1), Float.random(in: 0.4...1))
+        }
+
+        let left = buf.floatChannelData![0]
+        let right = buf.floatChannelData![1]
+        var res1: (Float, Float) = (0, 0)   // resonator state y1,y2
+        var res2: (Float, Float) = (0, 0)
+        let (r1w, r1r): (Float, Float) = (2 * .pi * 420 / sr, 0.985)
+        let (r2w, r2r): (Float, Float) = (2 * .pi * 980 / sr, 0.975)
+
+        for i in 0..<n {
+            let t = Float(i) / sr
+            // Murmur bed: white noise through two vocal-band resonators.
+            let white = Float.random(in: -1...1)
+            let y1 = 2 * r1r * cos(r1w) * res1.0 - r1r * r1r * res1.1 + white * 0.02
+            res1 = (y1, res1.0)
+            let y2 = 2 * r2r * cos(r2w) * res2.0 - r2r * r2r * res2.1 + white * 0.012
+            res2 = (y2, res2.0)
+            var l = y1 + y2 * 0.7
+            var r = y1 * 0.9 + y2 * 0.8
+
+            // Voice chorus (update targets sparsely for speed).
+            if i % 4 == 0 {
+                var sum: (Float, Float) = (0, 0)
+                for v in 0..<voices.count {
+                    voices[v].phase += 2 * .pi * voices[v].freq * 4 / sr
+                    if i % 4410 == 0 { voices[v].ampTarget = .random(in: 0...0.7) }
+                    voices[v].amp += (voices[v].ampTarget - voices[v].amp) * 0.0006 * 4
+                    let s = sin(voices[v].phase) * voices[v].amp
+                    sum.0 += s * (1 - voices[v].pan)
+                    sum.1 += s * voices[v].pan
+                }
+                lastVoiceMix = (sum.0 / 22, sum.1 / 22)
+            }
+            l += lastVoiceMix.0
+            r += lastVoiceMix.1
+
+            // Sporadic claps/shouts.
+            for e in events where i >= e.0 && i < e.0 + e.1 {
+                let k = Float(i - e.0) / Float(e.1)
+                let burst = Float.random(in: -1...1) * (1 - k) * 0.16 * e.3
+                l += burst * (1 - e.2)
+                r += burst * e.2
+            }
+
+            let swell = 0.78 + 0.15 * sin(2 * .pi * 0.09 * t) + 0.07 * sin(2 * .pi * 0.031 * t + 2)
+            left[i] = l * 0.5 * swell
+            right[i] = r * 0.5 * swell
+        }
+        // Loop-seam crossfade
+        let fade = Int(sr * 0.25)
+        for ch in [left, right] {
+            for i in 0..<fade {
+                let a = Float(i) / Float(fade)
+                ch[i] = ch[i] * a + ch[n - fade + i] * (1 - a)
+            }
+        }
+        return buf
+    }
+    private static var lastVoiceMix: (Float, Float) = (0, 0)
+
+    static func wind(seconds: Double, format: AVAudioFormat) -> AVAudioPCMBuffer {
         let buf = buffer(seconds: seconds, format: format)
         let n = Int(buf.frameLength)
         let sr = Float(format.sampleRate)
@@ -112,21 +217,37 @@ private enum Synth {
             let data = buf.floatChannelData![ch]
             var lp: Float = 0
             var lp2: Float = 0
-            let phase = Float(ch) * 1.7
+            let phase = Float(ch) * 2.3
             for i in 0..<n {
                 let t = Float(i) / sr
                 let white = Float.random(in: -1...1)
-                lp += 0.045 * (white - lp)      // rumble
-                lp2 += 0.28 * (white - lp2)     // hiss/voices
-                let swell = 0.75 + 0.18 * sin(2 * .pi * 0.11 * t + phase) + 0.09 * sin(2 * .pi * 0.043 * t + phase * 2)
-                data[i] = (lp * 2.6 + lp2 * 0.5) * 0.42 * swell
+                lp += 0.11 * (white - lp)       // body of the rush
+                lp2 += 0.5 * (white - lp2)      // high hiss
+                let gust = 0.8 + 0.2 * sin(2 * .pi * 0.7 * t + phase)
+                data[i] = (lp * 1.6 + lp2 * 0.5) * 0.5 * gust
             }
-            // Loop-seam crossfade
-            let fade = Int(sr * 0.25)
+            let fade = Int(sr * 0.2)
             for i in 0..<fade {
                 let a = Float(i) / Float(fade)
                 data[i] = data[i] * a + data[n - fade + i] * (1 - a)
             }
+        }
+        return buf
+    }
+
+    /// A rising rush for the "top gear" moment.
+    static func whoosh(format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let buf = buffer(seconds: 0.9, format: format)
+        let sr = Float(format.sampleRate)
+        var lp: Float = 0
+        fill(buf) { i, _ in
+            let t = Float(i) / sr
+            let white = Float.random(in: -1...1)
+            // opening filter: cutoff rises through the swell
+            let a = 0.04 + 0.5 * min(1, t / 0.5)
+            lp += a * (white - lp)
+            let env = min(1, t / 0.35) * exp(-max(0, t - 0.4) * 6)
+            return lp * env * 0.9
         }
         return buf
     }
@@ -157,15 +278,39 @@ private enum Synth {
     }
 
     static func footstep(pitch: Float, format: AVAudioFormat) -> AVAudioPCMBuffer {
-        let buf = buffer(seconds: 0.11, format: format)
+        let buf = buffer(seconds: 0.12, format: format)
         let sr = Float(format.sampleRate)
         var lp: Float = 0
         fill(buf) { i, _ in
             let t = Float(i) / sr
             let noise = Float.random(in: -1...1)
-            lp += 0.12 * (noise - lp)
-            let thud = sin(2 * .pi * 58 * pitch * t) * exp(-t * 42)
-            return (lp * exp(-t * 55) * 0.9 + thud * 0.8) * 0.9
+            lp += 0.14 * (noise - lp)
+            // Spike bite on the track surface + body thud.
+            let click = noise * exp(-t * 240) * 0.5
+            let scrape = lp * exp(-t * 48) * 1.1
+            let thud = sin(2 * .pi * 62 * pitch * t) * exp(-t * 36) * 1.0
+            return (click + scrape + thud) * 0.95
+        }
+        return buf
+    }
+
+    /// One hard exhale — breathy noise through a mouth-ish resonance.
+    static func breath(pitch: Float, format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let buf = buffer(seconds: 0.34, format: format)
+        let sr = Float(format.sampleRate)
+        var y1: Float = 0, y2: Float = 0
+        let w = 2 * .pi * 1150 * pitch / sr
+        let rr: Float = 0.965
+        var lp: Float = 0
+        fill(buf) { i, _ in
+            let t = Float(i) / sr
+            let white = Float.random(in: -1...1)
+            let y = 2 * rr * cos(w) * y1 - rr * rr * y2 + white * 0.06
+            y2 = y1; y1 = y
+            lp += 0.22 * (white - lp)
+            // Sharp huff: fast attack, breathy tail.
+            let env = min(1, t / 0.03) * exp(-max(0, t - 0.05) * 11)
+            return (y * 1.6 + lp * 0.5) * env * 0.8
         }
         return buf
     }
