@@ -31,12 +31,15 @@ final class TouchSCNView: SCNView {
         touch.location(in: self).x < bounds.midX ? .left : .right
     }
 
-    /// Vertical thumb position → effort 0..1 (comfortable margins top/bottom).
+    /// Horizontal thumb position → effort 0..1, mirrored per side so
+    /// sweeping OUTWARD (toward your side's edge) is always more effort.
     private func effort(of touch: UITouch) -> Double {
-        let y = touch.location(in: self).y
-        let top = bounds.height * 0.08
-        let usable = bounds.height * 0.80
-        return Double(max(0, min(1, 1 - (y - top) / usable)))
+        let x = touch.location(in: self).x
+        let half = bounds.width / 2
+        let fromCenter = abs(x - half)
+        let inner = half * 0.06
+        let usable = half * 0.86
+        return Double(max(0, min(1, (fromCenter - inner) / usable)))
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -47,8 +50,12 @@ final class TouchSCNView: SCNView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // Each riding thumb: vertical position is that side's effort input.
-        for t in touches { gameController?.effortInput(side: side(of: t), value: effort(of: t)) }
+        for t in touches {
+            gameController?.effortInput(side: side(of: t), value: effort(of: t))
+            // Downward motion feeds the dip detector (the lean at the line).
+            let dy = t.location(in: self).y - t.previousLocation(in: self).y
+            if dy > 0 { gameController?.dipInput(points: Double(dy)) }
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {

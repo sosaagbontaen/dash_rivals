@@ -48,7 +48,7 @@ struct MenuOverlay: View {
                 }
                 .padding(.top, 16)
 
-                // A/B mechanic toggle (dev)
+                // A/B mechanic toggle (dev) + units
                 HStack(spacing: 6) {
                     Text("MECHANIC")
                         .font(.system(size: 10, weight: .bold))
@@ -57,6 +57,14 @@ struct MenuOverlay: View {
                     mechanicChip("MOMENTS", .moments)
                 }
                 .padding(.top, 10)
+                HStack(spacing: 6) {
+                    Text("SPEED IN")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                    unitChip("M/S", false)
+                    unitChip("MPH", true)
+                }
+                .padding(.top, 4)
 
                 Text("PROOF OF CONCEPT")
                     .font(.system(size: 11, weight: .semibold))
@@ -76,6 +84,17 @@ struct MenuOverlay: View {
                 .foregroundStyle(game.mechanic == m ? .black : .white.opacity(0.7))
                 .padding(.horizontal, 12).padding(.vertical, 5)
                 .background(game.mechanic == m ? Style.gold : Color.white.opacity(0.12),
+                            in: Capsule())
+        }
+    }
+
+    private func unitChip(_ label: String, _ mph: Bool) -> some View {
+        Button { game.setUseMph(mph) } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(game.useMph == mph ? .black : .white.opacity(0.7))
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(game.useMph == mph ? Style.gold : Color.white.opacity(0.12),
                             in: Capsule())
         }
     }
@@ -186,6 +205,17 @@ struct RaceHUD: View {
 
     var body: some View {
         ZStack {
+            // Cinematic letterbox: slides in when you hit full flight.
+            VStack {
+                Rectangle().fill(.black)
+                    .frame(height: game.cinematicBars ? 36 : 0)
+                Spacer()
+                Rectangle().fill(.black)
+                    .frame(height: game.cinematicBars ? 36 : 0)
+            }
+            .ignoresSafeArea()
+            .animation(.easeInOut(duration: 0.45), value: game.cinematicBars)
+
             VStack {
                 // Broadcast clock bug: event · clock · sprint phase
                 HStack(spacing: 0) {
@@ -257,13 +287,14 @@ struct RaceHUD: View {
                     }
                     HStack(spacing: 4) {
                         Text(game.speedText).font(Style.mono(18)).foregroundStyle(.white)
-                        Text("m/s").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+                        Text(game.useMph ? "mph" : "m/s")
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.6))
                     }
                     .padding(.horizontal, 11).padding(.vertical, 5)
                     .background(Style.panel, in: Capsule())
                 }
                 ProgressStrip(dots: game.miniMap)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, game.gaugeVisible ? 48 : 16)
             }
 
             // The dip cue: yank both thumbs down at the line.
@@ -272,8 +303,8 @@ struct RaceHUD: View {
                     .offset(y: -20)
             }
 
-            // Twin effort gauges at the bottom corners — one per thumb,
-            // low so your eyes stay on the race.
+            // Twin horizontal effort gauges along the bottom corners — one per thumb,
+            // mirrored so sweeping outward is always more effort.
             if game.gaugeVisible {
                 VStack {
                     Spacer()
@@ -282,15 +313,16 @@ struct RaceHUD: View {
                                     bandCenter: game.bandCenter,
                                     bandHalf: game.bandHalf,
                                     tension: game.tensionValue)
-                            .padding(.leading, 20)
+                            .scaleEffect(x: -1, y: 1)   // left thumb: outward = leftward
+                            .padding(.leading, 16)
                         Spacer()
                         EffortGauge(effort: game.effortR,
                                     bandCenter: game.bandCenter,
                                     bandHalf: game.bandHalf,
                                     tension: game.tensionValue)
-                            .padding(.trailing, 20)
+                            .padding(.trailing, 16)
                     }
-                    .padding(.bottom, 6)
+                    .padding(.bottom, 5)
                 }
             }
         }
@@ -300,28 +332,29 @@ struct RaceHUD: View {
     }
 }
 
-/// Vertical effort gauge: the gold band is the target; the white bar is your thumb.
-/// Red creep means tension — you're pressing above the band and tightening up.
+/// Horizontal effort gauge: the gold band is the target; the white bar is your thumb.
+/// Red creep means tension — you're pushing past the band and tightening up.
+/// Rendered left-to-right = inner-to-outer; the left instance is x-flipped.
 struct EffortGauge: View {
     let effort: Double
     let bandCenter: Double
     let bandHalf: Double
     let tension: Double
 
-    private let height: CGFloat = 300
-    private let width: CGFloat = 34
+    private let width: CGFloat = 300
+    private let height: CGFloat = 30
 
-    private func y(_ value: Double) -> CGFloat {
-        height * CGFloat(1 - min(1, max(0, value)))
+    private func x(_ value: Double) -> CGFloat {
+        width * CGFloat(min(1, max(0, value)))
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .leading) {
             // Track
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 11)
                 .fill(Color.black.opacity(0.45))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 11)
                         .strokeBorder(tension > 0.4 ? Style.bad.opacity(0.3 + 0.6 * tension)
                                                     : Color.white.opacity(0.18),
                                       lineWidth: tension > 0.4 ? 2.5 : 1)
@@ -330,14 +363,15 @@ struct EffortGauge: View {
             RoundedRectangle(cornerRadius: 7)
                 .fill(Style.gold.opacity(0.38))
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Style.gold.opacity(0.85), lineWidth: 1.5))
-                .frame(width: width - 8, height: max(12, height * CGFloat(bandHalf * 2)))
-                .offset(x: 4, y: y(bandCenter + bandHalf))
+                .frame(width: max(12, width * CGFloat(bandHalf * 2)), height: height - 8)
+                .offset(x: x(bandCenter - bandHalf), y: 0)
+                .padding(.vertical, 4)
             // Thumb marker
             Capsule()
                 .fill(.white)
-                .frame(width: width + 10, height: 5)
+                .frame(width: 5, height: height + 10)
                 .shadow(color: .black.opacity(0.7), radius: 3)
-                .offset(x: -5, y: y(effort) - 2.5)
+                .offset(x: x(effort) - 2.5, y: 0)
         }
         .frame(width: width, height: height)
         .animation(.linear(duration: 0.08), value: effort)
@@ -372,6 +406,43 @@ struct BurnMeter: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Style.panel, in: Capsule())
+    }
+}
+
+/// Broadcast replay dressing: letterbox bars, red REPLAY bug, skip hint.
+struct ReplayOverlay: View {
+    @State private var blink = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Rectangle().fill(.black).frame(height: 54)
+                HStack {
+                    HStack(spacing: 7) {
+                        Circle().fill(Style.bad).frame(width: 9, height: 9)
+                            .opacity(blink ? 0.25 : 1)
+                        Text("REPLAY")
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundStyle(.white)
+                            .kerning(2)
+                    }
+                    Spacer()
+                    Text("TAP TO SKIP")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(.horizontal, 26)
+            }
+            Spacer()
+            Rectangle().fill(.black).frame(height: 54)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                blink = true
+            }
+        }
     }
 }
 

@@ -17,12 +17,30 @@ struct ResultsOverlay: View {
         game.resultRows.first?.time
     }
 
+    private var isPhotoFinish: Bool {
+        guard game.resultRows.count >= 2,
+              let t0 = game.resultRows[0].time, let t1 = game.resultRows[1].time else { return false }
+        return t1 - t0 < 0.04
+    }
+
     private var resultsTable: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("RESULT · MEN 100M FINAL")
-                .font(.system(size: 12, weight: .heavy))
-                .foregroundStyle(Style.gold)
-                .padding(.bottom, 3)
+            HStack(spacing: 8) {
+                Text("RESULT · MEN 100M FINAL")
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundStyle(Style.gold)
+                if isPhotoFinish {
+                    Text("PHOTO FINISH")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Style.gold, in: Capsule())
+                }
+                Text("WIND \(game.windText)")
+                    .font(Style.mono(10))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .padding(.bottom, 3)
             ForEach(game.resultRows) { row in
                 HStack(spacing: 9) {
                     Text("\(row.place)")
@@ -81,7 +99,10 @@ struct ResultsOverlay: View {
                     if let split = s.split50 {
                         statRow("50M SPLIT", String(format: "%.2f", split), tag: nil, good: true)
                     }
-                    statRow("TOP SPEED", String(format: "%.1f m/s", s.topSpeed), tag: nil, good: true)
+                    statRow("TOP SPEED",
+                            game.useMph ? String(format: "%.1f mph", s.topSpeed * 2.23694)
+                                        : String(format: "%.1f m/s", s.topSpeed),
+                            tag: nil, good: true)
                     if s.leanCredit > 0.001 {
                         statRow("LEAN", String(format: "−%.3f", s.leanCredit), tag: "DIP", good: true)
                     }

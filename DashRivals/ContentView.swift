@@ -20,9 +20,13 @@ struct ContentView: View {
             case .racing:
                 RaceHUD(game: game)
             case .finished:
-                ZStack {
-                    RaceHUD(game: game)
-                    FinishOverlay(game: game)
+                if game.replayActive {
+                    ReplayOverlay()
+                } else {
+                    ZStack {
+                        RaceHUD(game: game)
+                        FinishOverlay(game: game)
+                    }
                 }
             case .results:
                 ResultsOverlay(game: game)

@@ -60,6 +60,14 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     @Published var leanCue = false
     @Published var effortL: Double = 0.85
     @Published var effortR: Double = 0.85
+    // Broadcast replay
+    @Published var replayActive = false
+    @Published var windText = "+0.0"
+    // Speed units
+    @Published var useMph = false
+    private var useMphInternal = false
+    // Cinematic letterbox during full flight
+    @Published var cinematicBars = false
 
     // MARK: Scene
     let scene = SCNScene()
@@ -81,6 +89,15 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     private var playerFinishedAt: Double? = nil
     private var lastRelaxFlashAt: Double = -10
     private var playerLeanUntil: Double = 0        // scene time: dip pose held until then
+
+    // Broadcast replay: recorded sim frames, played back slow through a finish camera.
+    private struct RunnerSnap { let d: Double; let v: Double; let ph: Double }
+    private var replayFrames: [(t: Double, snaps: [RunnerSnap])] = []
+    private var replayCursor = 0
+    private var replayClock: Double = 0
+    private var replayEnd: Double = 0
+    private var replaying = false
+    private var skipReplay = false
 
     // Input events from the touch view (main), consumed on the render thread.
     private let inputLock = NSLock()
@@ -120,7 +137,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
 
         engine.loadField()
         for r in engine.runners {
-            let fig = RunnerFigure(athlete: r.athlete, leftLegForward: r.lane % 2 == 0)
+            let fig = RunnerFigure(athlete: r.athlete, leftLegForward: r.lane % 2 == 0, lane: r.lane)
             fig.root.position = SCNVector3(Roster.laneX(r.lane), 0, -1.4)
             fig.mode = .idle
             scene.rootNode.addChildNode(fig.root)
@@ -132,6 +149,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             mechanic = m
             engine.mechanic = m
         }
+        useMph = UserDefaults.standard.bool(forKey: "useMph")
+        useMphInternal = useMph
         tapHaptic.prepare()
         heavyHaptic.prepare()
     }
@@ -141,6 +160,14 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         mechanic = m
         UserDefaults.standard.set(m.rawValue, forKey: "mechanic")
         onRender { [self] in engine.mechanic = m }
+        audio.playTick()
+    }
+
+    /// Menu toggle: speed readout units.
+    func setUseMph(_ mph: Bool) {
+        useMph = mph
+        UserDefaults.standard.set(mph, forKey: "useMph")
+        onRender { [self] in useMphInternal = mph }
         audio.playTick()
     }
 
@@ -170,6 +197,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             nextPantAt = 0
             nextAutoTap = 0
             leanFeedbackDone = false
+            replayFrames.removeAll()
+            replaying = false
             engine.setPhase(.intro)
             phaseTime = 0
             cameraDirector.mode = .intro
@@ -194,6 +223,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             nextPantAt = 0
             nextAutoTap = 0
             leanFeedbackDone = false
+            replayFrames.removeAll()
+            replaying = false
             engine.setPhase(.marks)
             phaseTime = 0
             cameraDirector.mode = .set
@@ -228,12 +259,21 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         inputLock.unlock()
     }
 
-    /// Continuous per-thumb effort, 0 (bottom) .. 1 (top).
+    /// Continuous per-thumb effort, 0 (inner) .. 1 (outer edge).
     func effortInput(side: TapSide, value: Double) {
         inputLock.lock()
         latestEffort[side == .right] = value
         inputLock.unlock()
     }
+
+    /// Downward touch motion in points; a sharp drop in the final meters = the dip.
+    func dipInput(points: Double) {
+        inputLock.lock()
+        pendingDip += points
+        inputLock.unlock()
+    }
+    private var pendingDip: Double = 0
+    private var dipAccum: Double = 0
 
     // MARK: Render-thread helpers
 
@@ -265,6 +305,14 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         for a in actions { a() }
 
         processInputs()
+
+        if replaying {
+            runReplayFrame(dt: dt)
+            stadium.update(time: time)
+            audio.update(dt: dt)
+            return
+        }
+
         runAutopilot(dt: dt)
 
         // Slow-mo choreography: a beat on the gun, a stretch through the line.
@@ -272,6 +320,13 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         let events = engine.update(dt: dt * timeScale)
         handle(events: events)
         updateSpectacle()
+
+        // Record for the broadcast replay.
+        if engine.phase == .racing || engine.phase == .finished {
+            let snaps = engine.runners.map { RunnerSnap(d: $0.distance, v: $0.velocity, ph: $0.stridePhase) }
+            replayFrames.append((engine.timeSinceGun, snaps))
+        }
+
         updatePhaseLogic(dt: dt)
         updateFigures(dt: dt)
         updateCamera(dt: dt)
@@ -280,16 +335,66 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         audio.update(dt: dt)
     }
 
+    // MARK: Broadcast replay
+
+    private func startReplay() {
+        engine.setPhase(.results)          // stop the sim; the recording takes over
+        guard replayFrames.count > 40 else { finishCelebration(); return }
+        let tFin = engine.player.finishTime ?? engine.timeSinceGun
+        replayClock = max(replayFrames.first!.t, tFin - 2.4)
+        replayEnd = min(replayFrames.last!.t, tFin + 0.55)
+        replayCursor = 0
+        skipReplay = false
+        replaying = true
+        cameraDirector.mode = .finishCam
+        cameraDirector.setStreakSpeed(0)
+        audio.windTarget = 0
+        audio.crowdTarget = 0.6
+        publish { $0.replayActive = true }
+    }
+
+    private func runReplayFrame(dt: Double) {
+        replayClock += dt * 0.42
+        while replayCursor < replayFrames.count - 1, replayFrames[replayCursor].t < replayClock {
+            replayCursor += 1
+        }
+        let frame = replayFrames[replayCursor]
+        for (i, s) in frame.snaps.enumerated() {
+            let fig = figures[i]
+            fig.mode = .running
+            fig.root.position = SCNVector3(Roster.laneX(i + 1), 0, Float(s.d) - 0.35)
+            let lean = 0.06 + 0.88 * exp(-s.d / 11.0)
+            fig.update(phase: s.ph, speed: s.v, lean: s.v > 0.2 ? lean : 0.1, time: sceneTime)
+        }
+        let pd = frame.snaps[Roster.playerIndex].d
+        cameraDirector.update(dt: dt, time: sceneTime, introT: phaseTime,
+                              playerX: Roster.laneX(Roster.playerLane),
+                              playerZ: Float(pd) - 0.35, v: 0, phase: 0)
+        if replayClock >= replayEnd || skipReplay {
+            finishCelebration()
+        }
+    }
+
     private func processInputs() {
         inputLock.lock()
         let inputs = pendingInputs
         pendingInputs.removeAll()
         let effL = latestEffort[false]
         let effR = latestEffort[true]
+        let dip = pendingDip
+        pendingDip = 0
         inputLock.unlock()
+
+        // Dip detector: fast downward swipe in the final meters.
+        dipAccum = dipAccum * 0.86 + dip
+        if engine.phase == .racing, engine.playerLaunched,
+           engine.player.distance >= engine.tuning.leanZone, dipAccum > 55 {
+            _ = engine.executeLean()
+        }
 
         for (side, isDown, hostTime) in inputs {
             if isDown { heldSides.insert(side == .right) } else { heldSides.remove(side == .right) }
+            if replaying { if isDown { skipReplay = true }; continue }
             let latency = max(0, min(0.25, sceneTime - hostTime))
             let engineT = engine.timeSinceGun - latency
 
@@ -452,11 +557,17 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
 
         if let at = celebrationAt, phaseTime >= at, engine.phase == .finished {
             celebrationAt = nil
-            beginCelebrationAndResults()
+            startReplay()
         }
     }
 
-    private func beginCelebrationAndResults() {
+    private func finishCelebration() {
+        replaying = false
+        publish { $0.replayActive = false }
+        // Return everyone to their true final positions after the replay scrub.
+        for (i, r) in engine.runners.enumerated() {
+            figures[i].root.position = SCNVector3(Roster.laneX(r.lane), 0, Float(r.distance) - 0.35)
+        }
         cameraDirector.mode = .orbit
         audio.crowdTarget = 0.7
 
@@ -495,10 +606,12 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             audio.playAnnouncer(.newPB)
         }
 
+        let wind = String(format: "%+.1f", engine.windReading)
         publish {
             $0.resultRows = rows
             $0.summary = sum
             $0.uiPhase = .results
+            $0.windText = wind
             $0.bestTimeText = Self.formatPB(isNewPB ? pTime : prevPB)
         }
         if isNewPB {
@@ -688,7 +801,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             uiClockAccum = 0
             let clock = engine.phase == .results ? (engine.player.finishTime ?? engine.clock) : engine.clock
             let clockStr = String(format: "%.2f", max(0, clock))
-            let speedStr = String(format: "%.1f", engine.player.velocity)
+            let v = engine.player.velocity
+            let speedStr = String(format: "%.1f", useMphInternal ? v * 2.23694 : v)
             let promptStr = currentPrompt()
             let racing = engine.phase == .racing && engine.playerLaunched
             let phaseStr: String? = racing ? engine.sprintPhase.rawValue : nil
@@ -703,6 +817,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 && (engine.mechanic == .band || engine.player.distance > 26)
             let lean = racing && engine.player.finishTime == nil
                 && engine.player.distance > 88 && engine.leanExecutedAt == nil
+            let bars = racing && engine.sprintPhase != .drive
             publish {
                 $0.clockText = clockStr
                 $0.speedText = speedStr
@@ -718,6 +833,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 if $0.leanCue != lean { $0.leanCue = lean }
                 if $0.prompt != promptStr { $0.prompt = promptStr }
                 if $0.phaseLabel != phaseStr { $0.phaseLabel = phaseStr }
+                if $0.cinematicBars != bars { $0.cinematicBars = bars }
             }
         }
 

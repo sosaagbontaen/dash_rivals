@@ -109,6 +109,9 @@ final class RaceEngine {
     /// Active player mechanic (set from the menu; applies from the next race).
     var mechanic: SprintMechanic = .band
 
+    /// Trackside anemometer reading for this race (display flavor, m/s).
+    private(set) var windReading: Double = 0
+
     // Moments-mechanic state (drive mash; from 30m the band takes over)
     private(set) var burn: Double = 0               // drive-phase rev debt, 0..1.1
     private var rateEMA: Double = 3.0               // recent drive tap rate (Hz)
@@ -226,6 +229,7 @@ final class RaceEngine {
         burn = 0
         rateEMA = 3.0
         lastDriveTapAt = 0
+        windReading = (Double.random(in: -0.6...1.9) * 10).rounded() / 10
         phaseTime = 0
     }
 

@@ -21,7 +21,7 @@ final class RunnerFigure {
     /// Which leg is forward in the blocks (varies per athlete for a natural field).
     private let leftLegForward: Bool
 
-    init(athlete: Athlete, leftLegForward: Bool = Bool.random()) {
+    init(athlete: Athlete, leftLegForward: Bool = Bool.random(), lane: Int = 0) {
         self.leftLegForward = leftLegForward
 
         let skin = Self.material(athlete.skinTone, roughness: 0.62)
@@ -56,6 +56,18 @@ final class RunnerFigure {
         bib.geometry?.materials = [bibMat]
         bib.position = SCNVector3(0, 0.27, 0.122)
         torso.addChildNode(bib)
+        if lane > 0 {
+            let text = SCNText(string: "\(lane)", extrusionDepth: 0.004)
+            text.font = UIFont.systemFont(ofSize: 1, weight: .heavy)
+            text.flatness = 0.05
+            text.materials = [Self.material(UIColor(red: 0.08, green: 0.10, blue: 0.25, alpha: 1), roughness: 0.8)]
+            let n = SCNNode(geometry: text)
+            let (minB, maxB) = text.boundingBox
+            let scale = 0.075 / (maxB.y - minB.y)
+            n.scale = SCNVector3(scale, scale, 1)
+            n.position = SCNVector3(-(maxB.x - minB.x) * scale / 2, 0.235, 0.129)
+            torso.addChildNode(n)
+        }
 
         // Head
         headPivot.position = SCNVector3(0, 0.56, 0)
@@ -73,6 +85,14 @@ final class RunnerFigure {
         cap.scale = SCNVector3(0.99, 0.72, 0.95)
         cap.position = SCNVector3(0, 0.165, -0.022)
         headPivot.addChildNode(cap)
+        // Eyes — enough of a face to read as a person in the intro close-ups.
+        let eyeMat = Self.material(UIColor(white: 0.05, alpha: 1), roughness: 0.3)
+        for x: Float in [-0.033, 0.033] {
+            let eye = SCNNode(geometry: SCNSphere(radius: 0.0115))
+            eye.geometry?.materials = [eyeMat]
+            eye.position = SCNVector3(x, 0.128, 0.082)
+            headPivot.addChildNode(eye)
+        }
 
         // Arms — deltoid caps hide the joint, blade hands for the sprinter look.
         func buildArm(_ shoulder: SCNNode, _ elbow: SCNNode, x: Float) {
@@ -176,8 +196,9 @@ final class RunnerFigure {
         // Drive intensity: deep lean = the violent, clawing block-exit strides.
         let drive = max(0, min(1, (Float(lean) - 0.15) / 0.6))
 
-        hips.position.y = hipHeight - 0.03 * (1 - s) - 0.075 * drive + 0.038 * s * sin(2 * w)
-        hips.eulerAngles = SCNVector3(0, 0, 0.03 * s * sin(w))
+        hips.position.y = hipHeight - 0.03 * (1 - s) - 0.075 * drive + 0.038 * s * sin(2 * w - 0.6)
+        // Pelvis counter-rotates against the shoulder girdle.
+        hips.eulerAngles = SCNVector3(0, -0.11 * s * sin(w), 0.03 * s * sin(w))
 
         torso.eulerAngles = SCNVector3(Float(lean) + 0.05 * s * sin(2 * w + 1.2),
                                        (0.10 + 0.08 * drive) * s * sin(w), 0)

@@ -3,7 +3,7 @@ import SceneKit
 /// Drives the single gameplay camera through the whole presentation:
 /// menu beauty shot → intro dolly → set push-in → low chase cam → celebration orbit.
 final class CameraDirector {
-    enum Mode { case menu, intro, set, chase, orbit }
+    enum Mode { case menu, intro, set, chase, orbit, finishCam }
 
     let node = SCNNode()
     var mode: Mode = .menu
@@ -131,6 +131,13 @@ final class CameraDirector {
             targetLook = SIMD3(playerX, 1.15, playerZ)
             targetFov = 50
             stiffness = 2.2
+
+        case .finishCam:
+            // Broadcast long lens from trackside at the line, tracking the field in.
+            targetPos = SIMD3(14.2, 1.75, 97.2)
+            targetLook = SIMD3(4.9, 1.0, min(99.5, playerZ + 1.5))
+            targetFov = 30
+            stiffness = 7
         }
 
         // Exponential smoothing toward targets.
