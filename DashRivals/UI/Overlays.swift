@@ -48,13 +48,13 @@ struct MenuOverlay: View {
                 }
                 .padding(.top, 16)
 
-                // A/B mechanic toggle (dev) + units
+                // A/B tracking toggle (dev) + units
                 HStack(spacing: 6) {
-                    Text("MECHANIC")
+                    Text("TRACKING")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.45))
-                    mechanicChip("BAND", .band)
-                    mechanicChip("MOMENTS", .moments)
+                    trackingChip("LINEAR", .linear)
+                    trackingChip("CIRCLE", .circle)
                 }
                 .padding(.top, 10)
                 HStack(spacing: 6) {
@@ -77,13 +77,13 @@ struct MenuOverlay: View {
         }
     }
 
-    private func mechanicChip(_ label: String, _ m: SprintMechanic) -> some View {
-        Button { game.setMechanic(m) } label: {
+    private func trackingChip(_ label: String, _ t: TrackingStyle) -> some View {
+        Button { game.setTracking(t) } label: {
             Text(label)
                 .font(.system(size: 11, weight: .heavy))
-                .foregroundStyle(game.mechanic == m ? .black : .white.opacity(0.7))
+                .foregroundStyle(game.trackingStyle == t ? .black : .white.opacity(0.7))
                 .padding(.horizontal, 12).padding(.vertical, 5)
-                .background(game.mechanic == m ? Style.gold : Color.white.opacity(0.12),
+                .background(game.trackingStyle == t ? Style.gold : Color.white.opacity(0.12),
                             in: Capsule())
         }
     }
@@ -280,11 +280,7 @@ struct RaceHUD: View {
                         .shadow(color: .black.opacity(0.8), radius: 6)
                 }
                 HStack(spacing: 10) {
-                    if game.mechanic == .band {
-                        FormMeter(value: game.formValue)
-                    } else {
-                        BurnMeter(value: game.burnValue)
-                    }
+                    FormMeter(value: game.formValue)
                     HStack(spacing: 4) {
                         Text(game.speedText).font(Style.mono(18)).foregroundStyle(.white)
                         Text(game.useMph ? "mph" : "m/s")
@@ -303,29 +299,46 @@ struct RaceHUD: View {
                     .offset(y: -20)
             }
 
-            // Twin joystick gauges at the bottom corners — hold the white ring
-            // (your thumb's push distance) inside the gold target ring.
+            // Twin tracking gauges at the bottom corners (A/B: bars vs pads).
             if game.gaugeVisible {
                 VStack {
                     Spacer()
-                    HStack {
-                        EffortGauge(effort: game.effortL,
-                                    angle: game.stickAngleL,
-                                    targetRadius: game.bandCenter,
-                                    targetTol: game.bandHalf,
-                                    targetAngle: Double.pi - game.targetAngle,
-                                    tension: game.tensionValue)
-                            .padding(.leading, 14)
-                        Spacer()
-                        EffortGauge(effort: game.effortR,
-                                    angle: game.stickAngleR,
-                                    targetRadius: game.bandCenter,
-                                    targetTol: game.bandHalf,
-                                    targetAngle: game.targetAngle,
-                                    tension: game.tensionValue)
-                            .padding(.trailing, 14)
+                    if game.trackingStyle == .circle {
+                        HStack {
+                            EffortGauge(effort: game.effortL,
+                                        angle: game.stickAngleL,
+                                        targetRadius: game.bandCenter,
+                                        targetTol: game.discTol,
+                                        targetAngle: Double.pi - game.targetAngle,
+                                        tension: game.tensionValue)
+                                .padding(.leading, 14)
+                            Spacer()
+                            EffortGauge(effort: game.effortR,
+                                        angle: game.stickAngleR,
+                                        targetRadius: game.bandCenter,
+                                        targetTol: game.discTol,
+                                        targetAngle: game.targetAngle,
+                                        tension: game.tensionValue)
+                                .padding(.trailing, 14)
+                        }
+                        .padding(.bottom, 14)
+                    } else {
+                        HStack {
+                            LinearGauge(effort: game.effortL,
+                                        bandCenter: game.bandCenter,
+                                        bandHalf: game.bandHalf,
+                                        tension: game.tensionValue)
+                                .scaleEffect(x: -1, y: 1)   // left thumb: outward = leftward
+                                .padding(.leading, 16)
+                            Spacer()
+                            LinearGauge(effort: game.effortR,
+                                        bandCenter: game.bandCenter,
+                                        bandHalf: game.bandHalf,
+                                        tension: game.tensionValue)
+                                .padding(.trailing, 16)
+                        }
+                        .padding(.bottom, 6)
                     }
-                    .padding(.bottom, 14)
                 }
             }
         }
@@ -396,33 +409,47 @@ struct EffortGauge: View {
     }
 }
 
-/// Moments mechanic: how hot you revved the drive — you pay for the red zone after 80m.
-struct BurnMeter: View {
-    let value: Double
+/// Linear tracking gauge: the horizontal band — keep the white marker inside the
+/// gold target area as it slides through the race. Left instance is x-flipped so
+/// outward = more effort on both thumbs.
+struct LinearGauge: View {
+    let effort: Double
+    let bandCenter: Double
+    let bandHalf: Double
+    let tension: Double
 
-    private var color: Color {
-        if value < 0.55 { return Style.good }
-        if value < 0.8 { return Color(red: 1.0, green: 0.62, blue: 0.2) }
-        return Style.bad
+    private let width: CGFloat = 300
+    private let height: CGFloat = 30
+
+    private func x(_ value: Double) -> CGFloat {
+        width * CGFloat(min(1, max(0, value)))
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text("BURN")
-                .font(.system(size: 10, weight: .heavy))
-                .foregroundStyle(.white.opacity(0.6))
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.14)).frame(width: 110, height: 7)
-                // Sweet-spot marker
-                Rectangle().fill(Color.white.opacity(0.5)).frame(width: 1.5, height: 11)
-                    .offset(x: 110 * 0.55)
-                Capsule().fill(color)
-                    .frame(width: max(7, 110 * CGFloat(min(1, value / 1.1))), height: 7)
-                    .animation(.linear(duration: 0.12), value: value)
-            }
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 11)
+                .fill(Color.black.opacity(0.45))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11)
+                        .strokeBorder(tension > 0.4 ? Style.bad.opacity(0.3 + 0.6 * tension)
+                                                    : Color.white.opacity(0.18),
+                                      lineWidth: tension > 0.4 ? 2.5 : 1)
+                )
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Style.gold.opacity(0.38))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Style.gold.opacity(0.85), lineWidth: 1.5))
+                .frame(width: max(12, width * CGFloat(bandHalf * 2)), height: height - 8)
+                .offset(x: x(bandCenter - bandHalf), y: 0)
+                .padding(.vertical, 4)
+            Capsule()
+                .fill(abs(effort - bandCenter) <= bandHalf ? Color.white : Style.bad)
+                .frame(width: 5, height: height + 10)
+                .shadow(color: .black.opacity(0.7), radius: 3)
+                .offset(x: x(effort) - 2.5, y: 0)
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(Style.panel, in: Capsule())
+        .frame(width: width, height: height)
+        .animation(.linear(duration: 0.08), value: effort)
+        .animation(.linear(duration: 0.08), value: bandCenter)
     }
 }
 

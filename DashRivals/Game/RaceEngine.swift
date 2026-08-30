@@ -12,10 +12,11 @@ enum TapVerdict: String {
     case still = "BE STILL"
 }
 
-/// The two player mechanics under A/B evaluation (menu toggle).
-enum SprintMechanic: String {
-    case band       // one thumb rides the choreographed effort band
-    case moments    // drive mash → hands-off flight + timed surges → fade → lean
+/// The two tracking visualizations under A/B evaluation (menu toggle).
+/// Same choreography and scoring intent; different geometry.
+enum TrackingStyle: String {
+    case linear     // horizontal bars: marker chases the band left-right
+    case circle     // joystick pads: knob chases the wandering dot in 2D
 }
 
 /// The player's sprint unfolds in three phases (display flavor; the band drives play).
@@ -106,16 +107,11 @@ final class RaceEngine {
     private(set) var clock: Double = 0              // official race clock (0 at gun)
     private(set) var gunFired = false
 
-    /// Active player mechanic (set from the menu; applies from the next race).
-    var mechanic: SprintMechanic = .band
+    /// Active tracking style (set from the menu; applies immediately).
+    var tracking: TrackingStyle = .circle
 
     /// Trackside anemometer reading for this race (display flavor, m/s).
     private(set) var windReading: Double = 0
-
-    // Moments-mechanic state (drive mash; from 30m the band takes over)
-    private(set) var burn: Double = 0               // drive-phase rev debt, 0..1.1
-    private var rateEMA: Double = 3.0               // recent drive tap rate (Hz)
-    private var lastDriveTapAt: Double = 0
 
     // Player stick state: the target is a wandering point on the pad (radius follows
     // the sprint arc; angle drifts); the player chases it with both thumbs.
@@ -253,9 +249,6 @@ final class RaceEngine {
         stunUntil = 0
         leanExecutedAt = nil
         leanCredit = 0
-        burn = 0
-        rateEMA = 3.0
-        lastDriveTapAt = 0
         windReading = (Double.random(in: -0.6...1.9) * 10).rounded() / 10
         phaseTime = 0
     }
@@ -289,27 +282,6 @@ final class RaceEngine {
         playerLaunched = true
         player.reaction = falseStarted ? 0.30 : max(0.08, min(timeSinceGun, engineTime))
         player.velocity = tuning.launchImpulse
-        lastDriveTapAt = player.reaction
-    }
-
-    // MARK: Moments-mechanic input
-
-    /// A drive-phase power step. No timing windows: rate is intensity, and intensity
-    /// both accelerates you and accrues burn you pay for after 80m.
-    @discardableResult
-    func momentsDriveTap(engineTime: Double) -> Bool {
-        guard mechanic == .moments, phase == .racing, playerLaunched,
-              player.finishTime == nil, player.distance < 32 else { return false }
-        let now = min(timeSinceGun, max(engineTime, lastDriveTapAt + 0.02))
-        let gap = now - lastDriveTapAt
-        let instR = min(7.0, 1.0 / max(0.08, gap))
-        rateEMA = rateEMA * 0.7 + min(instR, 5.5) * 0.3
-        burn = min(1.1, burn + 0.05 * pow(instR / 4.5, 1.6))
-        // Taps beyond the biomechanical cap waste sharply (mashing self-defeats).
-        let popScale = instR <= 4.8 ? 1.0 : pow(4.8 / instR, 2)
-        player.velocity += 0.42 * popScale * max(0, 1 - player.velocity / 11.2)
-        lastDriveTapAt = now
-        return true
     }
 
 
@@ -343,15 +315,11 @@ final class RaceEngine {
         return .lean
     }
 
-    /// Late-race fade. Band: better tracking postpones it. Moments: burn brings it on.
+    /// Late-race fade; better tracking postpones it.
     var currentFatigue: Double {
         let t = timeSinceGun
         guard t > tuning.fatigueOnset else { return 1.0 }
-        let k: Double
-        switch mechanic {
-        case .band: k = tuning.fatigueK * (1.35 - 0.5 * qBar)
-        case .moments: k = tuning.fatigueK * (1 + 0.9 * max(0, burn - 0.5))
-        }
+        let k = tuning.fatigueK * (1.35 - 0.5 * qBar)
         return max(0.90, 1.0 - k * pow(t - tuning.fatigueOnset, 2))
     }
 
@@ -448,35 +416,17 @@ final class RaceEngine {
         if falseStarted, timeSinceGun < stunUntil { return }
         guard playerLaunched else { return }
 
-        switch mechanic {
-        case .band: stepPlayerBand(r, dt: dt)
-        case .moments: stepPlayerMoments(r, dt: dt)
-        }
+        stepPlayerTracking(r, dt: dt)
     }
 
-    private func stepPlayerMoments(_ r: RunnerState, dt: Double) {
-        if r.distance < 30 {
-            // Drive: acceleration flows while taps keep landing, scaled by intensity.
-            if timeSinceGun - lastDriveTapAt < 0.45 {
-                let A = 8.5 * min(1.12, max(0.22, rateEMA / 4.4))
-                r.velocity += A * max(0, 1 - r.velocity / 11.2) * dt
-            }
-            r.velocity = max(0, r.velocity)
-            r.distance += r.velocity * dt
-        } else {
-            // From 30m the race becomes the band: grab the gauges and ride it home.
-            // Burn from the drive feeds the fatigue model (see currentFatigue).
-            stepPlayerBand(r, dt: dt)
-        }
-    }
-
-    private func stepPlayerBand(_ r: RunnerState, dt: Double) {
+    private func stepPlayerTracking(_ r: RunnerState, dt: Double) {
         // Per-thumb radial smoothing (HUD knobs read these).
         playerEffortL += (rawL - playerEffortL) * min(1, dt * 14)
         playerEffortR += (rawR - playerEffortR) * min(1, dt * 14)
         let both = activeL && activeR
 
         // Combined thumb point in canonical space, smoothed so jitter isn't punished.
+        // (For linear tracking only the radial component matters; angles are -π/2.)
         var cx = smoothX, cy = smoothY
         var n = 0.0
         if activeL || activeR {
@@ -497,31 +447,54 @@ final class RaceEngine {
             _ = executeLean()
         }
 
-        // Chase the yellow dot: 2D distance to the wandering target, in dot-radius units.
         let b = currentBand
-        let tA = targetAngle(time: timeSinceGun, distance: r.distance)
-        let tol = discTolerance
-        let tx = b.center * cos(tA), ty = b.center * sin(tA)
-        let err = ((smoothX - tx) * (smoothX - tx) + (smoothY - ty) * (smoothY - ty)).squareRoot() / tol
         var q: Double
-        if err <= 1 {
-            // On the dot: the closer to its center, the faster you go.
-            q = 1 - 0.35 * err * err
-            tension = max(0, tension - dt * 0.25)
-        } else {
-            q = max(0.30, 1 - 0.5 * (err - 1))
-            // Pushing out past the dot = tightening up; trailing it is just underpowered.
-            if playerEffort > b.center + tol {
-                tension = min(1, tension + dt * min(2.5, (err - 1) * 1.4))
+        switch tracking {
+        case .circle:
+            // Chase the yellow dot: 2D distance to the wandering target.
+            let tA = targetAngle(time: timeSinceGun, distance: r.distance)
+            let tol = discTolerance
+            let tx = b.center * cos(tA), ty = b.center * sin(tA)
+            let err = ((smoothX - tx) * (smoothX - tx) + (smoothY - ty) * (smoothY - ty)).squareRoot() / tol
+            if err <= 1 {
+                // On the dot: the closer to its center, the faster you go.
+                q = 1 - 0.35 * err * err
+                tension = max(0, tension - dt * 0.25)
             } else {
-                tension = max(0, tension - dt * 0.30)
+                q = max(0.30, 1 - 0.5 * (err - 1))
+                // Pushing out past the dot = tightening up; trailing is underpowered.
+                if playerEffort > b.center + tol {
+                    tension = min(1, tension + dt * min(2.5, (err - 1) * 1.4))
+                } else {
+                    tension = max(0, tension - dt * 0.30)
+                }
+            }
+        case .linear:
+            // Ride the band: 1D error against the choreographed target (validated curve).
+            let err = (playerEffort - b.center) / b.half
+            if abs(err) <= 1 {
+                q = 1 - 0.25 * err * err
+                tension = max(0, tension - dt * 0.25)
+            } else if err > 1 {
+                q = max(0.45, 1 - 0.35 * (err - 1))
+                tension = min(1, tension + dt * min(2.5, (err - 1) * 1.6))
+            } else {
+                q = max(0.30, 1 - 0.42 * (-err - 1))
+                tension = max(0, tension - dt * 0.35)
             }
         }
         // Run with both arms: thumbs drifting apart costs form.
         if both {
-            let dx = rawL * cos(rawAngL) - rawR * cos(rawAngR)
-            let dy = rawL * sin(rawAngL) - rawR * sin(rawAngR)
-            q *= 1 - 0.35 * min(1, (dx * dx + dy * dy).squareRoot() / 0.35)
+            let div: Double
+            switch tracking {
+            case .circle:
+                let dx = rawL * cos(rawAngL) - rawR * cos(rawAngR)
+                let dy = rawL * sin(rawAngL) - rawR * sin(rawAngR)
+                div = (dx * dx + dy * dy).squareRoot()
+            case .linear:
+                div = abs(rawL - rawR)
+            }
+            q *= 1 - 0.35 * min(1, div / 0.35)
         }
         qBar += (q - qBar) * dt * 1.4
 

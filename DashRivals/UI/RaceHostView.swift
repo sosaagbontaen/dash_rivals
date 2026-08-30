@@ -39,10 +39,18 @@ final class TouchSCNView: SCNView {
         return CGPoint(x: x, y: bounds.height - 109)
     }
 
-    /// Effort = radial deflection; angle lets the HUD draw the knob under the thumb.
-    /// Must mirror EffortGauge.r(): deadR 9, usable 82 (size 190).
+    /// CIRCLE: effort = radial deflection from the stick origin (1:1 with the
+    /// widget: deadR 9, usable 82, size 190); angle places the knob under the thumb.
+    /// LINEAR: effort = horizontal position sweeping outward along the bottom bars.
     private func stickState(of touch: UITouch) -> (effort: Double, angle: Double) {
         let p = touch.location(in: self)
+        if gameController?.trackingStyle == .linear {
+            let half = bounds.width / 2
+            let fromCenter = abs(p.x - half)
+            let inner = half * 0.06
+            let usable = half * 0.86
+            return (Double(max(0, min(1, (fromCenter - inner) / usable))), -Double.pi / 2)
+        }
         let o = stickOrigin(for: side(of: touch))
         let dx = p.x - o.x, dy = p.y - o.y
         let d = hypot(dx, dy)

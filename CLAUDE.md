@@ -62,7 +62,7 @@ binary even though `xcodebuild` reports success. Build with an explicit
 - `BRIEF.md` — the POC spec. This is the active document.
 - `ROADMAP.md` — long-term vision. **Not to be implemented.**
 
-## The mechanics (A/B toggle on the menu: BAND / MOMENTS)
+## The mechanics (A/B toggle on the menu: LINEAR / CIRCLE)
 
 Shared: hold both sides to crouch into SET → gun after a random delay → first movement
 launches (reaction timed; moving before the gun = false start penalty). Both thumbs
@@ -75,13 +75,12 @@ deceleration; tracking quality (qBar → FORM meter) superlinearly drives sustai
 speed; thumbs drifting apart costs form. Final 6m: **swipe both thumbs DOWN** to dip
 at the line (up to 0.03s; "DIP!" chevron cue at 88m).
 
-- **BAND**: band-riding the whole race.
-- **MOMENTS**: 0–30m is a mash — every tap a power step; intensity fills a BURN meter
-  (sweet spot ~55%) that you pay for after 80m — then the sticks take over at 30m.
+- **LINEAR**: horizontal bottom-corner bars — the marker chases the sliding band
+  (1D error, validated curve from tune6.swift).
+- **CIRCLE**: joystick pads — the knob chases the wandering dot (2D error; the
+  MOMENTS mash mode was retired after playtesting).
 
-Skill curves validated headlessly (scratchpad tune6/tune7.swift): band — perfect
-≈ 9.86 … chaotic ≈ 12.2; moments — optimal-rev ≈ 9.94, masher ≈ 10.1, lazy ≈ 10.3.
-AI field runs 9.96–10.4. Cinematic beats: gun impact-freeze, FULL FLIGHT FOV bloom +
+Band-tracking skill curve: perfect ≈ 9.86 … chaotic ≈ 12.2. AI field runs 9.96–10.4. Cinematic beats: gun impact-freeze, FULL FLIGHT FOV bloom +
 letterbox bars past 30m, super-slow-mo final meters, then a trackside long-lens
 broadcast REPLAY (tap to skip) into results (photo-finish stamp, wind reading).
 

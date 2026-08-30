@@ -21,7 +21,6 @@ struct PlayerSummary {
     let split50: Double?
     let topSpeed: Double
     let leanCredit: Double
-    let burn: Double        // moments mechanic only (0 in band mode)
     let isNewPB: Bool
     let previousPB: Double?
 }
@@ -54,9 +53,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     @Published var formValue: Double = 0.9          // qBar — tracking quality
     @Published var gaugeVisible = false
     @Published var phaseLabel: String? = nil        // DRIVE / MAX VELOCITY / HOLD ON
-    // A/B mechanic state
-    @Published var mechanic: SprintMechanic = .band
-    @Published var burnValue: Double = 0
+    // A/B tracking-style state (LINEAR bars vs CIRCLE dot-chase)
+    @Published var trackingStyle: TrackingStyle = .circle
+    @Published var discTol: Double = 0.2
     @Published var leanCue = false
     @Published var effortL: Double = 0.85
     @Published var effortR: Double = 0.85
@@ -133,7 +132,6 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     }
     private var apNoise: Double = 0
     private var apNoise2: Double = 0
-    private var nextAutoTap: Double = 0
 
     override init() {
         super.init()
@@ -156,10 +154,10 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             figures.append(fig)
         }
         bestTimeText = Self.formatPB(storedPB)
-        if let raw = UserDefaults.standard.string(forKey: "mechanic"),
-           let m = SprintMechanic(rawValue: raw) {
-            mechanic = m
-            engine.mechanic = m
+        if let raw = UserDefaults.standard.string(forKey: "tracking"),
+           let t = TrackingStyle(rawValue: raw) {
+            trackingStyle = t
+            engine.tracking = t
         }
         useMph = UserDefaults.standard.bool(forKey: "useMph")
         useMphInternal = useMph
@@ -167,11 +165,11 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         heavyHaptic.prepare()
     }
 
-    /// Menu toggle: switch the player mechanic for upcoming races.
-    func setMechanic(_ m: SprintMechanic) {
-        mechanic = m
-        UserDefaults.standard.set(m.rawValue, forKey: "mechanic")
-        onRender { [self] in engine.mechanic = m }
+    /// Menu toggle: switch the tracking style (linear bars vs circular dot-chase).
+    func setTracking(_ t: TrackingStyle) {
+        trackingStyle = t
+        UserDefaults.standard.set(t.rawValue, forKey: "tracking")
+        onRender { [self] in engine.tracking = t }
         audio.playTick()
     }
 
@@ -207,7 +205,6 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             playerFinishedAt = nil
             celebrationAt = nil
             nextPantAt = 0
-            nextAutoTap = 0
             leanFeedbackDone = false
             replayFrames.removeAll()
             replaying = false
@@ -233,7 +230,6 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             playerFinishedAt = nil
             celebrationAt = nil
             nextPantAt = 0
-            nextAutoTap = 0
             leanFeedbackDone = false
             replayFrames.removeAll()
             replaying = false
@@ -452,11 +448,6 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                     engine.playerLaunch(engineTime: engineT)
                     haptics.launch()
                     cameraDirector.impulse(0.5)
-                } else if isDown, engine.mechanic == .moments,
-                          engine.player.finishTime == nil, engine.player.distance < 32 {
-                    if engine.momentsDriveTap(engineTime: engineT) {
-                        haptics.footstep(speedFactor: 0.7)
-                    }
                 }
                 if isDown { sideDownAt[side == .right] = engineT }
             default:
@@ -624,7 +615,6 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                                 split50: engine.player.split50,
                                 topSpeed: engine.player.topSpeed,
                                 leanCredit: engine.leanCredit,
-                                burn: engine.mechanic == .moments ? engine.burn : 0,
                                 isNewPB: isNewPB,
                                 previousPB: prevPB)
 
@@ -710,13 +700,6 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             } else if engine.player.distance > 98.2, engine.leanExecutedAt == nil,
                       engine.player.finishTime == nil {
                 _ = engine.executeLean()
-            } else if engine.mechanic == .moments, engine.player.distance < 32 {
-                // Mash the drive at a quality-dependent rate.
-                if engine.timeSinceGun >= nextAutoTap {
-                    _ = engine.momentsDriveTap(engineTime: engine.timeSinceGun)
-                    let rate = 3.0 + 1.6 * autoQuality
-                    nextAutoTap = engine.timeSinceGun + (1 / rate) * (1 + gaussianRand() * 0.08)
-                }
             } else {
                 // Track the yellow dot like a human: lag, smoothed 2D noise, over-press bias.
                 let q = autoQuality
@@ -853,16 +836,14 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             let racing = engine.phase == .racing && engine.playerLaunched
             let phaseStr: String? = racing ? engine.sprintPhase.rawValue : nil
             let band = engine.currentBand
-            let discTol = engine.discTolerance
+            let tolValue = engine.discTolerance
             let tAngle = engine.targetAngle(time: engine.timeSinceGun, distance: engine.player.distance)
             let effort = engine.playerEffort
             let tension = engine.tension
             let form = engine.qBar
-            let burnV = engine.burn
             let effL = engine.playerEffortL
             let effR = engine.playerEffortR
             let gauge = racing && engine.player.finishTime == nil
-                && (engine.mechanic == .band || engine.player.distance > 26)
             let lean = racing && engine.player.finishTime == nil
                 && engine.player.distance > 88 && engine.leanExecutedAt == nil
             let bars = racing && engine.sprintPhase != .drive
@@ -874,10 +855,10 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                 $0.effortL = effL
                 $0.effortR = effR
                 $0.bandCenter = band.center
-                $0.bandHalf = discTol
+                $0.bandHalf = band.half
+                $0.discTol = tolValue
                 $0.targetAngle = tAngle
                 $0.tensionValue = tension
-                $0.burnValue = burnV
                 if $0.gaugeVisible != gauge { $0.gaugeVisible = gauge }
                 if $0.leanCue != lean { $0.leanCue = lean }
                 if $0.prompt != promptStr { $0.prompt = promptStr }
@@ -907,13 +888,10 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
                engine.leanExecutedAt == nil {
                 return "DIP — YANK BOTH THUMBS DOWN!"
             }
-            switch engine.mechanic {
-            case .band:
-                return engine.timeSinceGun < 2.6 ? "RIDE THE GOLD BANDS — BOTH THUMBS" : nil
-            case .moments:
-                if engine.player.distance < 30 { return "POUND IT — TAP FAST!" }
-                if engine.player.distance < 42 { return "NOW GRAB THE BANDS — RIDE" }
-                return nil
+            guard engine.timeSinceGun < 2.6 else { return nil }
+            switch engine.tracking {
+            case .linear: return "RIDE THE GOLD BANDS — BOTH THUMBS"
+            case .circle: return "CHASE THE GOLD DOT — BOTH THUMBS"
             }
         default: return nil
         }

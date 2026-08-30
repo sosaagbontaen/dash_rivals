@@ -106,11 +106,6 @@ struct ResultsOverlay: View {
                     if s.leanCredit > 0.001 {
                         statRow("LEAN", String(format: "−%.3f", s.leanCredit), tag: "DIP", good: true)
                     }
-                    if s.burn > 0.01 {
-                        statRow("BURN", String(format: "%.0f%%", s.burn * 100),
-                                tag: s.burn > 0.85 ? "HOT" : (s.burn < 0.4 ? "TIMID" : "GOOD"),
-                                good: s.burn >= 0.4 && s.burn <= 0.85)
-                    }
                     if let pb = s.previousPB, !s.isNewPB {
                         statRow("YOUR BEST", String(format: "%.2f", pb), tag: nil, good: true)
                     }
