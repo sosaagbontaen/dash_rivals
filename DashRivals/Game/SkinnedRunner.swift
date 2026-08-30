@@ -96,6 +96,9 @@ final class SkinnedRunner: AthleteFigure {
     private var currentClip: String? = nil
     private var spine1: SCNNode?
     private var spine1Bind = SCNQuaternion(0, 0, 0, 1)
+    private var hipsBone: SCNNode?
+    private var hipsBindX: Float = 0
+    private var hipsBindZ: Float = 0
     private var launchEndsAt: Double = -1
     private var lastTime: Double = 0
 
@@ -128,6 +131,11 @@ final class SkinnedRunner: AthleteFigure {
 
         spine1 = Self.findNode(in: container, suffix: "Spine1")
         if let s = spine1 { spine1Bind = s.orientation }
+        hipsBone = Self.findNode(in: container, suffix: "Hips")
+        if let h = hipsBone {
+            hipsBindX = h.position.x
+            hipsBindZ = h.position.z
+        }
 
         // Kit tint by material name (Remy: Topmat/Bottommat/Shoesmat;
         // Y Bot: Alpha_Body_MAT). Skin, hair and eyes stay untouched.
@@ -212,8 +220,16 @@ final class SkinnedRunner: AthleteFigure {
         if mode == .blocks { launchEndsAt = -1 }
     }
 
-    /// Layer the drive lean / finish dip on the spine after clips are evaluated.
+    /// Post-animation fixups, applied after clips are evaluated each frame.
     func postAnimationAdjust(lean: Double) {
+        // Kill baked-in root motion: Mixamo clips exported without "In Place"
+        // physically travel forward then snap back on loop. The simulation owns
+        // all track translation, so pin the hips laterally (vertical bounce stays).
+        if let h = hipsBone {
+            h.position.x = hipsBindX
+            h.position.z = hipsBindZ
+        }
+        // Layer the drive lean / finish dip on the spine.
         guard mode == .running || mode == .decel, let s = spine1 else { return }
         let pitch = Float(max(0, lean - 0.20)) * 0.9
         guard pitch > 0.01 else { return }
