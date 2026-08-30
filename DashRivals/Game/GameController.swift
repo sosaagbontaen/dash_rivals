@@ -145,8 +145,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         let template = SkinnedRunner.loadTemplate()
         for r in engine.runners {
             let fig: AthleteFigure
-            if let template {
-                fig = SkinnedRunner(athlete: r.athlete, template: template)
+            if let template, let skinned = SkinnedRunner(athlete: r.athlete, template: template) {
+                fig = skinned
             } else {
                 fig = RunnerFigure(athlete: r.athlete, leftLegForward: r.lane % 2 == 0, lane: r.lane)
             }

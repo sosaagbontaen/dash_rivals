@@ -6,7 +6,7 @@ protocol AthleteFigure: AnyObject {
     var root: SCNNode { get }
     var mode: RunnerFigure.Mode { get set }
     func update(phase: Double, speed: Double, lean: Double, time: Double)
-    /// Called from renderer(_:didApplyAnimations:) — the only safe point to
+    /// Called from renderer(_:didApplyAnimationsAtTime:) — the only safe point to
     /// layer procedural adjustments (lean/dip) on top of running clips.
     func postAnimationAdjust(lean: Double)
 }
@@ -15,68 +15,73 @@ extension RunnerFigure: AthleteFigure {
     func postAnimationAdjust(lean: Double) {}   // fully procedural already
 }
 
-/// v4 athlete: a Mixamo-rigged skinned mesh, animated by the bundled mocap clips
-/// (sprint/run/idle/crouch/victory) with clip speed slaved to the simulation's
-/// stride rate, plus bone-level tweaks for the race choreography.
+/// v4 athlete: a Mixamo-rigged skinned mesh (Collada export), animated by the
+/// bundled mocap clips with playback slaved to the simulation's stride rate.
 final class SkinnedRunner: AthleteFigure {
 
     // MARK: Template discovery (once, at launch)
 
     struct Template {
-        let characterScene: SCNScene
-        let clips: [String: SCNAnimationPlayer]    // keys: sprint/running/idle/crouch/victory
+        let characterURL: URL
+        let clips: [String: SCNAnimation]          // launch/sprint/crouch/idle/victory/running
+        let clipDurations: [String: Double]
     }
 
-    /// Finds Mixamo files bundled from DashRivals/Assets/Mixamo. Returns nil if
-    /// none are present (the game then uses procedural figures).
+    private static func clipKey(for filename: String) -> String? {
+        let n = filename.lowercased()
+        if n.contains("to sprint") { return "launch" }
+        if n.contains("sprint") { return "sprint" }
+        if n.contains("crouch") { return "crouch" }
+        if n.contains("victory") { return "victory" }
+        if n.contains("running") { return "running" }
+        if n.contains("idle") { return "idle" }
+        return nil
+    }
+
+    /// Finds Mixamo files bundled from DashRivals/Assets/Mixamo (flattened into
+    /// the bundle root). Returns nil if none are present.
     static func loadTemplate() -> Template? {
-        let exts = ["dae", "usdz", "scn"]
-        var urls: [URL] = []
-        for ext in exts {
-            urls += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
-        }
-        guard !urls.isEmpty else { return nil }
+        let daeURLs = Bundle.main.urls(forResourcesWithExtension: "dae", subdirectory: nil) ?? []
+        guard !daeURLs.isEmpty else { return nil }
 
-        let clipKeys = ["sprint", "running", "idle", "crouch", "victory"]
         var clipURLs: [String: URL] = [:]
-        var characterURL: URL? = nil
-        for url in urls {
-            let name = url.lastPathComponent.lowercased()
-            if let key = clipKeys.first(where: { name.contains($0) }) {
+        var characters: [URL] = []
+        for url in daeURLs {
+            if let key = clipKey(for: url.lastPathComponent) {
                 if clipURLs[key] == nil { clipURLs[key] = url }
-            } else if characterURL == nil {
-                characterURL = url
+            } else {
+                characters.append(url)
             }
         }
-        // A lone animation file can double as the character (it carries the skin).
-        guard let charURL = characterURL ?? clipURLs["sprint"] ?? clipURLs.values.first,
-              let scene = try? SCNScene(url: charURL, options: [.checkConsistency: false])
-        else { return nil }
+        // Prefer the human; `defaults write com.dashrivals.poc character "y bot"` to swap.
+        let pref = (UserDefaults.standard.string(forKey: "character") ?? "remy").lowercased()
+        let characterURL = characters.first { $0.lastPathComponent.lowercased().contains(pref) }
+            ?? characters.first { !$0.lastPathComponent.lowercased().contains("bot") }
+            ?? characters.first
+        guard let characterURL else { return nil }
 
-        var clips: [String: SCNAnimationPlayer] = [:]
+        // Mixamo DAE clips are one <animation> per bone: group them into one clip.
+        var clips: [String: SCNAnimation] = [:]
+        var durations: [String: Double] = [:]
         for (key, url) in clipURLs {
-            if let player = Self.firstAnimationPlayer(inSceneAt: url) {
-                player.animation.usesSceneTimeBase = false
-                player.animation.repeatCount = .infinity
-                clips[key] = player
-            }
+            guard let source = SCNSceneSource(url: url, options: nil) else { continue }
+            let ids = source.identifiersOfEntries(withClass: CAAnimation.self)
+            let anims = ids.compactMap { source.entryWithIdentifier($0, withClass: CAAnimation.self) }
+            guard !anims.isEmpty else { continue }
+            let group = CAAnimationGroup()
+            group.animations = anims
+            let dur = anims.map { $0.duration }.max() ?? 1
+            group.duration = dur
+            let anim = SCNAnimation(caAnimation: group)
+            anim.repeatCount = key == "launch" ? 1 : .greatestFiniteMagnitude
+            anim.blendInDuration = 0.15
+            anim.blendOutDuration = 0.15
+            clips[key] = anim
+            durations[key] = dur
         }
-        NSLog("SkinnedRunner: loaded template %@ with clips %@",
-              charURL.lastPathComponent, clips.keys.sorted().joined(separator: ","))
-        return Template(characterScene: scene, clips: clips)
-    }
-
-    private static func firstAnimationPlayer(inSceneAt url: URL) -> SCNAnimationPlayer? {
-        guard let scene = try? SCNScene(url: url, options: [.checkConsistency: false]) else { return nil }
-        var found: SCNAnimationPlayer? = nil
-        scene.rootNode.enumerateHierarchy { node, stop in
-            if let key = node.animationKeys.first,
-               let player = node.animationPlayer(forKey: key) {
-                found = player
-                stop.pointee = true
-            }
-        }
-        return found
+        NSLog("SkinnedRunner: character %@ · clips [%@]",
+              characterURL.lastPathComponent, clips.keys.sorted().joined(separator: " "))
+        return Template(characterURL: characterURL, clips: clips, clipDurations: durations)
     }
 
     // MARK: Instance
@@ -86,54 +91,65 @@ final class SkinnedRunner: AthleteFigure {
         didSet { if mode != oldValue { applyMode() } }
     }
 
-    private var skeletonRoot: SCNNode?          // mixamorig hips
+    private var players: [String: SCNAnimationPlayer] = [:]
+    private var clipDurations: [String: Double] = [:]
+    private var currentClip: String? = nil
     private var spine1: SCNNode?
     private var spine1Bind = SCNQuaternion(0, 0, 0, 1)
-    private var players: [String: SCNAnimationPlayer] = [:]
-    private var currentClip: String? = nil
-    private var extraLean: Float = 0            // dip / drive layering
+    private var launchEndsAt: Double = -1
+    private var lastTime: Double = 0
 
-    init(athlete: Athlete, template: Template) {
-        // Clone the whole character (clone() shares geometry; skinner follows).
-        let character = template.characterScene.rootNode.clone()
-        // Mixamo rigs are authored in centimeters; normalize to ~1.85m tall.
-        let (minB, maxB) = character.boundingBox
+    /// Fresh scene load per athlete so each instance owns its own skeleton
+    /// (cloned skinners share bones — the classic SceneKit trap).
+    init?(athlete: Athlete, template: Template) {
+        guard let scene = try? SCNScene(url: template.characterURL,
+                                        options: [.checkConsistency: false]) else { return nil }
+        let container = SCNNode()
+        for child in scene.rootNode.childNodes {
+            container.addChildNode(child)
+        }
+
+        // Mixamo units are centimeters; normalize to a ~1.85m athlete.
+        let (minB, maxB) = container.boundingBox
         let height = maxB.y - minB.y
         if height > 0.01 {
             let s = 1.85 / height
-            character.scale = SCNVector3(s, s, s)
+            container.scale = SCNVector3(s, s, s)
         }
-        root.addChildNode(character)
+        root.addChildNode(container)
 
-        // Find key bones (Collada import may swap ':' for '_').
-        skeletonRoot = Self.findBone(in: character, suffix: "Hips")
-        spine1 = Self.findBone(in: character, suffix: "Spine1")
+        clipDurations = template.clipDurations
+        for (key, anim) in template.clips {
+            let player = SCNAnimationPlayer(animation: anim)
+            player.stop()
+            container.addAnimationPlayer(player, forKey: key)
+            players[key] = player
+        }
+
+        spine1 = Self.findNode(in: container, suffix: "Spine1")
         if let s = spine1 { spine1Bind = s.orientation }
 
-        // Attach clip players to the skeleton so they drive these bones.
-        let host = skeletonRoot ?? character
-        for (key, player) in template.clips {
-            let copy = SCNAnimationPlayer(animation: player.animation)
-            copy.stop()
-            host.addAnimationPlayer(copy, forKey: key)
-            players[key] = copy
-        }
-
-        // Per-athlete tint: multiply the kit color into every material so the
-        // field reads as different lanes even on a shared mesh.
-        character.enumerateHierarchy { node, _ in
-            for material in node.geometry?.materials ?? [] {
-                material.multiply.contents = athlete.kitPrimary
+        // Kit tint by material name (Remy: Topmat/Bottommat/Shoesmat;
+        // Y Bot: Alpha_Body_MAT). Skin, hair and eyes stay untouched.
+        container.enumerateHierarchy { node, _ in
+            for m in node.geometry?.materials ?? [] {
+                let name = (m.name ?? "").lowercased()
+                if name.contains("top") || name.contains("alpha_body") {
+                    m.multiply.contents = athlete.kitPrimary
+                } else if name.contains("bottom") {
+                    m.multiply.contents = athlete.kitSecondary
+                } else if name.contains("shoes") {
+                    m.multiply.contents = athlete.shoeColor
+                }
             }
         }
         applyMode()
     }
 
-    private static func findBone(in node: SCNNode, suffix: String) -> SCNNode? {
+    private static func findNode(in node: SCNNode, suffix: String) -> SCNNode? {
         var found: SCNNode? = nil
         node.enumerateHierarchy { n, stop in
-            if let name = n.name,
-               name.hasSuffix(suffix) || name.hasSuffix(suffix.replacingOccurrences(of: ":", with: "_")) {
+            if let name = n.name, name.hasSuffix(suffix) {
                 found = n
                 stop.pointee = true
             }
@@ -146,15 +162,27 @@ final class SkinnedRunner: AthleteFigure {
     private func applyMode() {
         let key: String?
         switch mode {
-        case .running, .decel: key = players["sprint"] != nil ? "sprint" : "running"
+        case .running, .decel:
+            // Explode out of the crouch with the transition clip, then loop the sprint.
+            if launchEndsAt < 0, players["launch"] != nil, mode == .running {
+                key = "launch"
+                launchEndsAt = lastTime + (clipDurations["launch"] ?? 0.8) / 1.25
+            } else {
+                key = players["sprint"] != nil ? "sprint" : "running"
+            }
         case .idle: key = "idle"
-        case .blocks, .set: key = "crouch"
-        case .celebrate: key = "victory"
+        case .blocks, .set: key = players["crouch"] != nil ? "crouch" : "idle"
+        case .celebrate: key = players["victory"] != nil ? "victory" : "idle"
         case .exhausted: key = players["crouch"] != nil ? "crouch" : "idle"
         }
+        setClip(key)
+    }
+
+    private func setClip(_ key: String?) {
         guard key != currentClip else { return }
-        if let old = currentClip, let p = players[old] { p.stop(withBlendOutDuration: 0.2) }
+        if let old = currentClip, let p = players[old] { p.stop(withBlendOutDuration: 0.15) }
         if let k = key, let p = players[k] {
+            if k == "launch" { p.speed = 1.25 }
             p.play()
             currentClip = k
         } else {
@@ -162,16 +190,26 @@ final class SkinnedRunner: AthleteFigure {
         }
     }
 
+    /// Ready the figure for a new race (lets the launch clip fire again).
+    func resetForRace() {
+        launchEndsAt = -1
+    }
+
     // MARK: Per-frame
 
     func update(phase: Double, speed: Double, lean: Double, time: Double) {
-        // Slave the mocap cycle to the simulation stride rate.
-        if mode == .running || mode == .decel, let clip = currentClip, let p = players[clip] {
-            // Mixamo sprint cycles are ~0.7s per stride pair at speed 1.
-            let strideFreq = 1.7 + 1.1 * (speed / 12.0)     // cycles/sec (matches engine)
-            p.speed = CGFloat(max(0.3, strideFreq * 0.7))
+        lastTime = time
+        if currentClip == "launch", time >= launchEndsAt, mode == .running || mode == .decel {
+            setClip(players["sprint"] != nil ? "sprint" : "running")
         }
-        extraLean = Float(max(0, lean - 0.25)) * 0.8
+        // Slave the mocap cycle to the simulation stride rate (clip = one cycle).
+        if let clip = currentClip, clip == "sprint" || clip == "running", let p = players[clip] {
+            let strideFreq = 1.7 + 1.1 * (speed / 12.0)     // cycles/sec, matches engine
+            let dur = clipDurations[clip] ?? 0.7
+            p.speed = CGFloat(max(0.35, strideFreq * dur))
+        }
+        // New race begins when we go back to the blocks.
+        if mode == .blocks { launchEndsAt = -1 }
     }
 
     /// Layer the drive lean / finish dip on the spine after clips are evaluated.
