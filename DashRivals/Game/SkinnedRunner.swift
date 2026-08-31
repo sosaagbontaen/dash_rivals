@@ -123,7 +123,7 @@ final class SkinnedRunner: AthleteFigure {
     private var footMin: Float = 0
     private var footMax: Float = 0
     /// How much to exaggerate thigh swing (1 = raw clip).
-    private let strideBoost: Float = 1.55
+    private let strideBoost: Float = 1.85
     private var lastDT: Double = 1.0 / 60.0
     private var currentSpeed: Double = 0
     private var leftLegForward = true
@@ -271,22 +271,16 @@ final class SkinnedRunner: AthleteFigure {
         if currentClip == "launch", time >= launchEndsAt, mode == .running || mode == .decel {
             setClip(players["sprint"] != nil ? "sprint" : "running")
         }
-        // Pace so the planted foot stays still: over one cycle the body must
-        // travel exactly two of the clip's strides, so
-        //   playback = duration · v / (2 · strideLength).
-        // Falls back to a cadence estimate until the stride has been measured.
+        // Pace so the planted foot stays still: over one cycle the body travels
+        // two strides, so cadence = v / (2 · stride). Clamp in *cadence*, not in
+        // playback ratio — clip lengths differ (Overdrive shortens the cycle),
+        // and a fixed ratio would silently become 9 steps/s on a short clip.
         if let clip = currentClip, clip == "sprint" || clip == "running", let p = players[clip] {
             let dur = clipDurations[clip] ?? 0.5
-            let target: Double
-            if footExcursion > 0.5 {
-                target = dur * speed / Double(2 * footExcursion)
-            } else {
-                target = (1.55 + 1.05 * min(1.0, speed / 11.5)) * dur
-            }
-            // Cap at a believable sprint cadence (~5.5 steps/s). The clip's
-            // stride is too short to fully close the gap, so the remainder shows
-            // as a little glide rather than a frantic shuffle.
-            p.speed = CGFloat(max(0.45, min(1.20, target)))
+            let stride = footExcursion > 0.5 ? Double(footExcursion) : 1.2
+            let wanted = speed / (2 * stride)                  // cycles per second
+            let cadence = max(1.2, min(2.7, wanted))           // ~2.4-5.4 steps/s
+            p.speed = CGFloat(max(0.3, min(2.2, cadence * dur)))
         }
         // New race begins when we go back to the blocks.
         if mode == .blocks { launchEndsAt = -1 }
@@ -352,6 +346,7 @@ final class SkinnedRunner: AthleteFigure {
             let span = footMax - footMin
             if span > 0.5, span < 4 {
                 footExcursion = footExcursion == 0 ? span : footExcursion * 0.95 + span * 0.05
+
             }
         }
 

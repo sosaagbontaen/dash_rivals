@@ -40,13 +40,17 @@ posed procedurally in `SkinnedRunner.poseBlockStart`.
 
 Measured at runtime from the foot bone, for a 1.85 m athlete:
 
-| clip | stride / step | needed at 10.5 m/s |
+| clip | cycle | stride / step |
 |---|---|---|
-| Fast Run (raw) | 0.88 m | ~2.2 m |
-| Fast Run + 1.55x swing boost | 1.21 m | ~2.2 m |
+| Fast Run, Overdrive 50 | 0.433 s | 0.88 m raw |
+| Fast Run, Overdrive 100 | 0.267 s | ~0.84 m raw |
+| Overdrive 100 + 1.85x swing boost | 0.267 s | **1.36 m** |
+| needed at 10.5 m/s | - | ~2.2 m |
 
-The engine amplifies thigh swing and then paces the cycle from the measured
-stride, capped at ~5.5 steps/s. The rest shows as glide. To close the gap at
-the source, download **Sprint/Fast Run with Overdrive 100 and "In Place"
-UNCHECKED** - the baked ground travel is then measurable directly and the
-pacing can lock the foot exactly.
+**Overdrive raises intensity and speeds the cycle up; it does not lengthen the
+stride.** Both downloads carry roughly the same stride. The engine amplifies
+thigh swing, paces from the measured stride, and clamps cadence to 2.4-5.4
+steps/s; the remaining mismatch shows as glide (~30%).
+
+Do not cap playback as a ratio - clip lengths differ, and a ratio tuned for a
+0.43 s cycle becomes 9 steps/s on a 0.27 s one. Clamp cadence instead.
