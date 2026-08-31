@@ -142,7 +142,7 @@ final class Stadium {
             p.eulerAngles = SCNVector3(-0.7, 0, 0)
             block.addChildNode(p)
         }
-        block.position = SCNVector3(x, 0, -0.55)
+        block.position = SCNVector3(x, 0, -0.88)
         return block
     }
 

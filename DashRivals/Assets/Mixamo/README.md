@@ -22,3 +22,16 @@ Animations for that character (30 fps, no keyframe reduction, with skin):
 Keep "sprint" / "running" / "idle" / "crouch" / "victory" somewhere in each
 animation filename (Mixamo's default names are fine). The character file is
 whichever mesh file doesn't match those words.
+
+## Re-download notes (asset-side quality)
+
+The stock **Sprint** clip only covers ~1.6 m per step — a jogging stride. The game
+caps leg cadence at a realistic ~4.9 steps/s, so at 11 m/s the feet slide slightly.
+To fix it at the source, re-download **Sprint** with:
+
+- **Overdrive ≈ 100** (longer, more aggressive stride — the single biggest win)
+- **Character Arm-Space** ~35 (tighter, sprint-like arm carriage)
+- "In Place" either way — root motion is compensated in code
+
+There is no true four-point block start in Mixamo's library; the set position is
+posed procedurally in `SkinnedRunner.poseBlockStart`.

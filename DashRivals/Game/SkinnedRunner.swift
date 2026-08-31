@@ -72,10 +72,19 @@ final class SkinnedRunner: AthleteFigure {
             group.animations = anims
             let dur = anims.map { $0.duration }.max() ?? 1
             group.duration = dur
+            // Hold the last evaluated pose; without this the rig snaps back to
+            // its bind pose (a T-pose flash) whenever a clip ends or is removed.
+            group.isRemovedOnCompletion = false
+            group.fillMode = .forwards
+            for sub in anims {
+                sub.isRemovedOnCompletion = false
+                sub.fillMode = .forwards
+            }
             let anim = SCNAnimation(caAnimation: group)
             anim.repeatCount = key == "launch" ? 1 : .greatestFiniteMagnitude
-            anim.blendInDuration = 0.15
-            anim.blendOutDuration = 0.15
+            anim.isRemovedOnCompletion = false
+            anim.blendInDuration = 0.25
+            anim.blendOutDuration = 0.25
             clips[key] = anim
             durations[key] = dur
         }
@@ -98,6 +107,17 @@ final class SkinnedRunner: AthleteFigure {
     private var spine1Bind = SCNQuaternion(0, 0, 0, 1)
     private var hipsBone: SCNNode?
     private var characterContainer: SCNNode?
+    /// Bones posed by hand for the block start, with their bind orientations.
+    private var poseBones: [String: SCNNode] = [:]
+    private var poseBind: [String: SCNQuaternion] = [:]
+    private var hipsBindY: Float = 0
+    /// Measured world metres of ground travel per second of clip playback at
+    /// speed 1 — used to match leg turnover to actual ground speed (no skate).
+    private var authoredRate: Float = 0
+    private var lastDT: Double = 1.0 / 60.0
+    private var currentSpeed: Double = 0
+    private var leftLegForward = true
+
     private var hipsBindX: Float = 0      // hips origin in root space, bind pose
     private var hipsBindZ: Float = 0
     private var launchEndsAt: Double = -1
@@ -133,6 +153,16 @@ final class SkinnedRunner: AthleteFigure {
         spine1 = Self.findNode(in: container, suffix: "Spine1")
         if let s = spine1 { spine1Bind = s.orientation }
         characterContainer = container
+        for name in ["Hips", "Spine", "Spine1", "Spine2", "Neck", "Head",
+                     "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
+                     "LeftForeArm", "RightForeArm",
+                     "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg",
+                     "LeftFoot", "RightFoot"] {
+            if let n = Self.findNode(in: container, suffix: name) {
+                poseBones[name] = n
+                poseBind[name] = n.orientation
+            }
+        }
         hipsBone = Self.findNode(in: container, suffix: "Hips")
         if let h = hipsBone {
             // Where the hips sit in root space at bind pose — the anchor the
@@ -140,6 +170,7 @@ final class SkinnedRunner: AthleteFigure {
             let bind = root.convertPosition(SCNVector3Zero, from: h)
             hipsBindX = bind.x
             hipsBindZ = bind.z
+            hipsBindY = h.position.y
         }
 
         // Kit tint by material name (Remy: Topmat/Bottommat/Shoesmat;
@@ -156,6 +187,7 @@ final class SkinnedRunner: AthleteFigure {
                 }
             }
         }
+        leftLegForward = athlete.bib.count % 2 == 0
         applyMode()
     }
 
@@ -184,7 +216,11 @@ final class SkinnedRunner: AthleteFigure {
                 key = players["sprint"] != nil ? "sprint" : "running"
             }
         case .idle: key = "idle"
-        case .blocks, .set: key = players["crouch"] != nil ? "crouch" : "idle"
+        case .blocks, .set:
+            // Mixamo has no track block start — "Crouching Idle" is a stealth
+            // crouch with the hips at standing height. Keep it attached only so
+            // the animation pass runs, then override every bone by hand.
+            key = players["crouch"] != nil ? "crouch" : "idle"
         case .celebrate: key = players["victory"] != nil ? "victory" : "idle"
         case .exhausted: key = players["crouch"] != nil ? "crouch" : "idle"
         }
@@ -193,14 +229,20 @@ final class SkinnedRunner: AthleteFigure {
 
     private func setClip(_ key: String?) {
         guard key != currentClip else { return }
-        if let old = currentClip, let p = players[old] { p.stop(withBlendOutDuration: 0.15) }
+        // Start the incoming clip first, then blend the outgoing one away, so the
+        // rig is never left with nothing driving it (that gap renders as a T-pose).
         if let k = key, let p = players[k] {
             if k == "launch" { p.speed = 1.25 }
             p.play()
-            currentClip = k
-        } else {
-            currentClip = nil
         }
+        if key == nil {
+            // Hand-posed modes: every clip must be fully detached, otherwise the
+            // held animation pose (fillMode .forwards) overrides model writes.
+            for (_, p) in players { p.stop() }
+        } else if let old = currentClip, let p = players[old] {
+            p.stop(withBlendOutDuration: 0.25)
+        }
+        currentClip = key
     }
 
     /// Ready the figure for a new race (lets the launch clip fire again).
@@ -211,15 +253,26 @@ final class SkinnedRunner: AthleteFigure {
     // MARK: Per-frame
 
     func update(phase: Double, speed: Double, lean: Double, time: Double) {
+        lastDT = max(1.0 / 240.0, min(0.1, time - lastTime))
         lastTime = time
+        currentSpeed = speed
         if currentClip == "launch", time >= launchEndsAt, mode == .running || mode == .decel {
             setClip(players["sprint"] != nil ? "sprint" : "running")
         }
-        // Slave the mocap cycle to the simulation stride rate (clip = one cycle).
+        // Match leg turnover to real ground speed. The Sprint clip is authored at
+        // ~12.2 m/s of travel per cycle; playing it faster than the body actually
+        // moves is what makes a sprint read as frantic jogging (foot skate).
         if let clip = currentClip, clip == "sprint" || clip == "running", let p = players[clip] {
-            let strideFreq = 1.7 + 1.1 * (speed / 12.0)     // cycles/sec, matches engine
-            let dur = clipDurations[clip] ?? 0.7
-            p.speed = CGFloat(max(0.35, strideFreq * dur))
+            if authoredRate > 0.5 {
+                // Exact foot-lock would need speed/authoredRate. Mixamo's "Sprint"
+                // only covers ~1.6m per step (a jog stride), so an exact match runs
+                // the legs at ~6 steps/s — the frantic look. Cap at a real sprint
+                // cadence (~4.9 steps/s) and accept a little slide at top speed.
+                let target = Float(speed) / authoredRate
+                p.speed = CGFloat(max(0.75, min(1.30, target)))
+            } else {
+                p.speed = 1.0        // until the first calibration lands
+            }
         }
         // New race begins when we go back to the blocks.
         if mode == .blocks { launchEndsAt = -1 }
@@ -227,12 +280,13 @@ final class SkinnedRunner: AthleteFigure {
 
     /// Post-animation fixups, applied after clips are evaluated each frame.
     func postAnimationAdjust(lean: Double) {
-        // Kill baked-in root motion. Mixamo clips exported without "In Place"
-        // walk the hips forward (Sprint: 6.5m per 0.53s cycle) and snap back on
-        // loop, which stacks on the simulation's own translation. The animated
-        // value lives on the presentation node, so writing to the animated bone
-        // does nothing — instead measure where the hips actually landed this
-        // frame and slide the (un-animated) container back by that much.
+        // Hand-authored block start: no clip is driving the rig in these modes,
+        // so model-space bone writes stick.
+        if mode == .blocks || mode == .set {
+            poseBlockStart(setLift: mode == .set ? 1 : 0)
+            return
+        }
+
         if let hips = hipsBone, let container = characterContainer {
             // Measure where the hips actually landed this frame (presentation node —
             // the model node never sees animated values) and slide the un-animated
@@ -247,6 +301,17 @@ final class SkinnedRunner: AthleteFigure {
                 p.x -= driftX
                 p.z -= driftZ
                 container.position = p
+
+                // Self-calibrate the clip's authored ground speed: this frame's
+                // drift is exactly how far the animation travelled, so
+                // rate = drift / (dt · playbackSpeed) world metres per clip-second.
+                if mode == .running, currentClip == "sprint", currentSpeed > 4,
+                   let player = players["sprint"], player.speed > 0.01 {
+                    let rate = driftZ / (Float(lastDT) * Float(player.speed))
+                    if rate > 2, rate < 40 {
+                        authoredRate = authoredRate == 0 ? rate : authoredRate * 0.9 + rate * 0.1
+                    }
+                }
             }
         }
         // Layer the drive lean / finish dip on the spine.
@@ -255,6 +320,55 @@ final class SkinnedRunner: AthleteFigure {
         guard pitch > 0.01 else { return }
         let delta = SCNQuaternion(sin(pitch / 2), 0, 0, cos(pitch / 2))
         s.orientation = SCNQuaternion.multiply(spine1Bind, delta)
+    }
+
+    // MARK: Block start (posed by hand — Mixamo has no track start)
+
+    private func axisQ(_ x: Float, _ y: Float, _ z: Float, _ angle: Float) -> SCNQuaternion {
+        let h = angle / 2, s = sin(h)
+        return SCNQuaternion(x * s, y * s, z * s, cos(h))
+    }
+
+    /// Rotate a bone by pitch/yaw/roll in its parent's frame, relative to bind.
+    private func poseBone(_ name: String, pitch: Float = 0, yaw: Float = 0, roll: Float = 0) {
+        guard let n = poseBones[name], let bind = poseBind[name] else { return }
+        var q = SCNQuaternion(0, 0, 0, 1)
+        if pitch != 0 { q = SCNQuaternion.multiply(q, axisQ(1, 0, 0, pitch)) }
+        if yaw != 0 { q = SCNQuaternion.multiply(q, axisQ(0, 1, 0, yaw)) }
+        if roll != 0 { q = SCNQuaternion.multiply(q, axisQ(0, 0, 1, roll)) }
+        n.orientation = SCNQuaternion.multiply(q, bind)
+    }
+
+    /// Four-point sprint start. setLift 0 = "on your marks" (hips low),
+    /// 1 = "set" (hips above the shoulders, weight over the hands).
+    private func poseBlockStart(setLift: Float) {
+        let lift = max(0, min(1, setLift))
+        // Hips drop and tip forward; on "set" they rise above the shoulders.
+        if let h = hipsBone {
+            h.position.y = hipsBindY * (0.60 + 0.09 * lift)
+        }
+        poseBone("Hips", pitch: 1.32 - 0.16 * lift)
+        poseBone("Spine", pitch: -0.16)
+        poseBone("Spine1", pitch: -0.14)
+        poseBone("Spine2", pitch: -0.10)
+        poseBone("Neck", pitch: -0.55)
+        poseBone("Head", pitch: -0.40)
+
+        // Front leg tucked under the chest, back leg driven into the rear pedal.
+        let front = leftLegForward ? "Left" : "Right"
+        let back = leftLegForward ? "Right" : "Left"
+        poseBone("\(front)UpLeg", pitch: -1.70 + 0.12 * lift)
+        poseBone("\(front)Leg", pitch: 1.55 - 0.30 * lift)
+        poseBone("\(front)Foot", pitch: 0.55)
+        poseBone("\(back)UpLeg", pitch: -1.05 + 0.30 * lift)
+        poseBone("\(back)Leg", pitch: 1.45 - 0.45 * lift)
+        poseBone("\(back)Foot", pitch: 0.70)
+
+        // Arms drop vertically to the line: counter the torso's forward pitch.
+        poseBone("LeftArm", pitch: -1.15, roll: 1.50)
+        poseBone("RightArm", pitch: -1.15, roll: -1.50)
+        poseBone("LeftForeArm", pitch: -0.12)
+        poseBone("RightForeArm", pitch: -0.12)
     }
 }
 
