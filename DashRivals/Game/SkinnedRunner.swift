@@ -97,7 +97,8 @@ final class SkinnedRunner: AthleteFigure {
     private var spine1: SCNNode?
     private var spine1Bind = SCNQuaternion(0, 0, 0, 1)
     private var hipsBone: SCNNode?
-    private var hipsBindX: Float = 0
+    private var characterContainer: SCNNode?
+    private var hipsBindX: Float = 0      // hips origin in root space, bind pose
     private var hipsBindZ: Float = 0
     private var launchEndsAt: Double = -1
     private var lastTime: Double = 0
@@ -131,10 +132,14 @@ final class SkinnedRunner: AthleteFigure {
 
         spine1 = Self.findNode(in: container, suffix: "Spine1")
         if let s = spine1 { spine1Bind = s.orientation }
+        characterContainer = container
         hipsBone = Self.findNode(in: container, suffix: "Hips")
         if let h = hipsBone {
-            hipsBindX = h.position.x
-            hipsBindZ = h.position.z
+            // Where the hips sit in root space at bind pose — the anchor the
+            // root-motion compensation holds them to every frame.
+            let bind = root.convertPosition(SCNVector3Zero, from: h)
+            hipsBindX = bind.x
+            hipsBindZ = bind.z
         }
 
         // Kit tint by material name (Remy: Topmat/Bottommat/Shoesmat;
@@ -222,12 +227,27 @@ final class SkinnedRunner: AthleteFigure {
 
     /// Post-animation fixups, applied after clips are evaluated each frame.
     func postAnimationAdjust(lean: Double) {
-        // Kill baked-in root motion: Mixamo clips exported without "In Place"
-        // physically travel forward then snap back on loop. The simulation owns
-        // all track translation, so pin the hips laterally (vertical bounce stays).
-        if let h = hipsBone {
-            h.position.x = hipsBindX
-            h.position.z = hipsBindZ
+        // Kill baked-in root motion. Mixamo clips exported without "In Place"
+        // walk the hips forward (Sprint: 6.5m per 0.53s cycle) and snap back on
+        // loop, which stacks on the simulation's own translation. The animated
+        // value lives on the presentation node, so writing to the animated bone
+        // does nothing — instead measure where the hips actually landed this
+        // frame and slide the (un-animated) container back by that much.
+        if let hips = hipsBone, let container = characterContainer {
+            // Measure where the hips actually landed this frame (presentation node —
+            // the model node never sees animated values) and slide the un-animated
+            // container back by the drift, so the mesh stays locked to its lane
+            // position and the simulation owns every meter of travel.
+            let hw = hips.presentation.worldPosition
+            let rw = root.presentation.worldPosition
+            let driftX = (hw.x - rw.x) - hipsBindX
+            let driftZ = (hw.z - rw.z) - hipsBindZ
+            if driftX.isFinite, driftZ.isFinite {
+                var p = container.position
+                p.x -= driftX
+                p.z -= driftZ
+                container.position = p
+            }
         }
         // Layer the drive lean / finish dip on the spine.
         guard mode == .running || mode == .decel, let s = spine1 else { return }
