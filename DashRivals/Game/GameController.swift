@@ -101,6 +101,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     private var replayCursor = 0
     private var replayClock: Double = 0
     private var replayEnd: Double = 0
+    private static let replayRate = 0.42
     private var replaying = false
     private var skipReplay = false
 
@@ -384,7 +385,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     }
 
     private func runReplayFrame(dt: Double) {
-        replayClock += dt * 0.42
+        replayClock += dt * Self.replayRate
         while replayCursor < replayFrames.count - 1, replayFrames[replayCursor].t < replayClock {
             replayCursor += 1
         }
@@ -394,7 +395,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             fig.mode = .running
             fig.root.position = SCNVector3(Roster.laneX(i + 1), 0, Float(s.d) - 0.35)
             let lean = 0.06 + 0.88 * exp(-s.d / 11.0)
-            fig.update(phase: s.ph, speed: s.v, lean: s.v > 0.2 ? lean : 0.1, time: sceneTime)
+            // The replay runs at replayRate; the leg cycle has to match it.
+            fig.update(phase: s.ph, speed: s.v * Self.replayRate,
+                       lean: s.v > 0.2 ? lean : 0.1, time: sceneTime)
         }
         let pd = frame.snaps[Roster.playerIndex].d
         cameraDirector.update(dt: dt, time: sceneTime, introT: phaseTime,
@@ -781,8 +784,11 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // The dip at the line.
             if r.athlete.isPlayer, sceneTime < playerLeanUntil { lean = 0.85 }
             figureLeans[i] = r.velocity > 0.2 ? lean : 0.1
-            fig.update(phase: r.stridePhase, speed: r.velocity, lean: figureLeans[i],
-                       time: sceneTime)
+            // Feed the *displayed* speed: during impact-freeze and the slow-motion
+            // finish the world advances at timeScale, so the legs must cycle at
+            // timeScale too, or they churn while the ground crawls.
+            fig.update(phase: r.stridePhase, speed: r.velocity * timeScale,
+                       lean: figureLeans[i], time: sceneTime)
 
             // Footstep audio + haptic: two steps per stride cycle.
             let stepCount = Int(r.stridePhase * 2)

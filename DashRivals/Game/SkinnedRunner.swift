@@ -166,7 +166,7 @@ final class SkinnedRunner: AthleteFigure {
         characterContainer = container
         for name in ["Hips", "Spine", "Spine1", "Spine2", "Neck", "Head",
                      "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
-                     "LeftForeArm", "RightForeArm",
+                     "LeftForeArm", "RightForeArm", "LeftHand", "RightHand",
                      "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg",
                      "LeftFoot", "RightFoot"] {
             if let n = Self.findNode(in: container, suffix: name) {
@@ -228,14 +228,22 @@ final class SkinnedRunner: AthleteFigure {
             }
         case .idle: key = "idle"
         case .blocks, .set:
-            // Mixamo has no track block start — "Crouching Idle" is a stealth
-            // crouch with the hips at standing height. Keep it attached only so
-            // the animation pass runs, then override every bone by hand.
-            key = players["crouch"] != nil ? "crouch" : "idle"
+            // Mixamo has no track block start ("Crouching Idle" is a stealth
+            // crouch with the hips at standing height), so the four-point set is
+            // authored here as a pose. It must be applied as an *animation*:
+            // SceneKit drives skinned bones from animations, and plain model
+            // writes to those bones are ignored.
+            key = nil
         case .celebrate: key = players["victory"] != nil ? "victory" : "idle"
         case .exhausted: key = players["crouch"] != nil ? "crouch" : "idle"
         }
         setClip(key)
+        if mode == .blocks || mode == .set {
+            applyBlockPose(setLift: mode == .set ? 1 : 0)
+        } else {
+            for (_, bone) in poseBones { bone.removeAnimation(forKey: "blockPose") }
+            hipsBone?.removeAnimation(forKey: "blockPoseY")
+        }
     }
 
     private func setClip(_ key: String?) {
@@ -290,7 +298,6 @@ final class SkinnedRunner: AthleteFigure {
         // Hand-authored block start: no clip is driving the rig in these modes,
         // so model-space bone writes stick.
         if mode == .blocks || mode == .set {
-            poseBlockStart(setLift: mode == .set ? 1 : 0)
             return
         }
 
@@ -389,36 +396,62 @@ final class SkinnedRunner: AthleteFigure {
         n.orientation = SCNQuaternion.multiply(q, bind)
     }
 
-    /// Four-point sprint start. setLift 0 = "on your marks" (hips low),
-    /// 1 = "set" (hips above the shoulders, weight over the hands).
-    private func poseBlockStart(setLift: Float) {
+    /// Four-point sprint start, authored as pose animations on each bone.
+    /// setLift 0 = "on your marks" (hips low), 1 = "set" (hips up, weight forward).
+    private func applyBlockPose(setLift: Float) {
         let lift = max(0, min(1, setLift))
-        // Hips drop and tip forward; on "set" they rise above the shoulders.
-        if let h = hipsBone {
-            h.position.y = hipsBindY * (0.60 + 0.09 * lift)
-        }
-        poseBone("Hips", pitch: 1.32 - 0.16 * lift)
-        poseBone("Spine", pitch: -0.16)
-        poseBone("Spine1", pitch: -0.14)
-        poseBone("Spine2", pitch: -0.10)
-        poseBone("Neck", pitch: -0.55)
-        poseBone("Head", pitch: -0.40)
-
-        // Front leg tucked under the chest, back leg driven into the rear pedal.
         let front = leftLegForward ? "Left" : "Right"
         let back = leftLegForward ? "Right" : "Left"
-        poseBone("\(front)UpLeg", pitch: 1.45 - 0.12 * lift)
-        poseBone("\(front)Leg", pitch: -1.75 + 0.30 * lift)
-        poseBone("\(front)Foot", pitch: 0.35)
-        poseBone("\(back)UpLeg", pitch: 0.30 - 0.15 * lift)
-        poseBone("\(back)Leg", pitch: -1.30 + 0.35 * lift)
-        poseBone("\(back)Foot", pitch: 0.45)
 
-        // Arms drop vertically to the line: counter the torso's forward pitch.
-        poseBone("LeftArm", pitch: -2.35, roll: 1.50)
-        poseBone("RightArm", pitch: -2.35, roll: -1.50)
-        poseBone("LeftForeArm", pitch: -0.12)
-        poseBone("RightForeArm", pitch: -0.12)
+        // (bone, pitch, roll) — pitch rotates in the sagittal plane, parent frame.
+        var pose: [(String, Float, Float)] = [
+            ("Hips",   1.30 - 0.14 * lift, 0),
+            ("Spine",  -0.14, 0), ("Spine1", -0.12, 0), ("Spine2", -0.10, 0),
+            ("Neck",   -0.50, 0), ("Head",   -0.38, 0),
+            ("LeftArm",  -1.30, 1.50), ("RightArm", -1.30, -1.50),
+            ("LeftForeArm", -0.12, 0), ("RightForeArm", -0.12, 0),
+        ]
+        pose += [
+            ("\(front)UpLeg", 0.85 + 0.10 * lift, 0),
+            ("\(front)Leg",  -1.45 + 0.25 * lift, 0),
+            ("\(front)Foot",  0.30, 0),
+            ("\(back)UpLeg",  0.35 - 0.10 * lift, 0),
+            ("\(back)Leg",   -0.60 + 0.20 * lift, 0),
+            ("\(back)Foot",   0.50, 0),
+        ]
+
+        for (name, pitch, roll) in pose {
+            guard let bone = poseBones[name], let bind = poseBind[name] else { continue }
+            var q = SCNQuaternion(0, 0, 0, 1)
+            if pitch != 0 { q = SCNQuaternion.multiply(q, axisQ(1, 0, 0, pitch)) }
+            // For the arms, "roll" is applied about Y: with the chest pitched
+            // forward, its forward axis points at the track, which is where the
+            // hands need to go.
+            if roll != 0 { q = SCNQuaternion.multiply(q, axisQ(0, 0, 1, roll)) }
+            let target = SCNQuaternion.multiply(q, bind)
+            let a = CABasicAnimation(keyPath: "orientation")
+            a.fromValue = NSValue(scnVector4: target)
+            a.toValue = NSValue(scnVector4: target)
+            a.duration = 1e8
+            a.fillMode = .forwards
+            a.isRemovedOnCompletion = false
+            bone.removeAnimation(forKey: "blockPose")
+            bone.addAnimation(a, forKey: "blockPose")
+        }
+
+        // Hips drop into the crouch (and lift on "set").
+        if let hips = hipsBone {
+            var p = hips.position
+            p.y = hipsBindY * (0.62 + 0.10 * lift)
+            let a = CABasicAnimation(keyPath: "position")
+            a.fromValue = NSValue(scnVector3: p)
+            a.toValue = NSValue(scnVector3: p)
+            a.duration = 1e8
+            a.fillMode = .forwards
+            a.isRemovedOnCompletion = false
+            hips.removeAnimation(forKey: "blockPoseY")
+            hips.addAnimation(a, forKey: "blockPoseY")
+        }
     }
 }
 

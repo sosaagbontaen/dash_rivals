@@ -128,13 +128,13 @@ final class Stadium {
         let dark = flatMaterial(UIColor(white: 0.13, alpha: 1))
         let accent = flatMaterial(UIColor(red: 0.95, green: 0.55, blue: 0.05, alpha: 1))
 
-        let rail = SCNBox(width: 0.07, height: 0.05, length: 0.62, chamferRadius: 0.01)
+        let rail = SCNBox(width: 0.07, height: 0.05, length: 0.85, chamferRadius: 0.01)
         rail.materials = [dark]
         let railNode = SCNNode(geometry: rail)
-        railNode.position = SCNVector3(0, 0.03, 0)
+        railNode.position = SCNVector3(0, 0.03, -0.30)
         block.addChildNode(railNode)
 
-        for (i, dz) in [Float(-0.10), Float(-0.34)].enumerated() {
+        for (i, dz) in [Float(-0.05), Float(-0.60)].enumerated() {
             let pedal = SCNBox(width: 0.16, height: 0.04, length: 0.18, chamferRadius: 0.01)
             pedal.materials = [accent]
             let p = SCNNode(geometry: pedal)
@@ -142,7 +142,7 @@ final class Stadium {
             p.eulerAngles = SCNVector3(-0.7, 0, 0)
             block.addChildNode(p)
         }
-        block.position = SCNVector3(x, 0, -0.88)
+        block.position = SCNVector3(x, 0, -0.50)
         return block
     }
 
