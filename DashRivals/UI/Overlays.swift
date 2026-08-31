@@ -58,14 +58,6 @@ struct MenuOverlay: View {
                 }
                 .padding(.top, 10)
                 HStack(spacing: 6) {
-                    Text("ATHLETE")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.45))
-                    characterChip("REMY", "remy")
-                    characterChip("Y BOT", "y bot")
-                }
-                .padding(.top, 4)
-                HStack(spacing: 6) {
                     Text("SPEED IN")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.45))

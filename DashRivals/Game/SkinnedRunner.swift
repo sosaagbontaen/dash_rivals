@@ -56,10 +56,9 @@ final class SkinnedRunner: AthleteFigure {
                 characters.append(url)
             }
         }
-        // Prefer the human; `defaults write com.dashrivals.poc character "y bot"` to swap.
-        let pref = (UserDefaults.standard.string(forKey: "character") ?? "remy").lowercased()
-        let characterURL = characters.first { $0.lastPathComponent.lowercased().contains(pref) }
-            ?? characters.first { !$0.lastPathComponent.lowercased().contains("bot") }
+        // Always prefer a real human mesh. (The Y Bot mannequin doesn't bind
+        // correctly to these clips yet — its limbs detach — so it is not offered.)
+        let characterURL = characters.first { !$0.lastPathComponent.lowercased().contains("bot") }
             ?? characters.first
         guard let characterURL else { return nil }
 
@@ -408,16 +407,16 @@ final class SkinnedRunner: AthleteFigure {
         // Front leg tucked under the chest, back leg driven into the rear pedal.
         let front = leftLegForward ? "Left" : "Right"
         let back = leftLegForward ? "Right" : "Left"
-        poseBone("\(front)UpLeg", pitch: -1.70 + 0.12 * lift)
-        poseBone("\(front)Leg", pitch: 1.55 - 0.30 * lift)
-        poseBone("\(front)Foot", pitch: 0.55)
-        poseBone("\(back)UpLeg", pitch: -1.05 + 0.30 * lift)
-        poseBone("\(back)Leg", pitch: 1.45 - 0.45 * lift)
-        poseBone("\(back)Foot", pitch: 0.70)
+        poseBone("\(front)UpLeg", pitch: 1.45 - 0.12 * lift)
+        poseBone("\(front)Leg", pitch: -1.75 + 0.30 * lift)
+        poseBone("\(front)Foot", pitch: 0.35)
+        poseBone("\(back)UpLeg", pitch: 0.30 - 0.15 * lift)
+        poseBone("\(back)Leg", pitch: -1.30 + 0.35 * lift)
+        poseBone("\(back)Foot", pitch: 0.45)
 
         // Arms drop vertically to the line: counter the torso's forward pitch.
-        poseBone("LeftArm", pitch: -1.15, roll: 1.50)
-        poseBone("RightArm", pitch: -1.15, roll: -1.50)
+        poseBone("LeftArm", pitch: -2.35, roll: 1.50)
+        poseBone("RightArm", pitch: -2.35, roll: -1.50)
         poseBone("LeftForeArm", pitch: -0.12)
         poseBone("RightForeArm", pitch: -0.12)
     }
