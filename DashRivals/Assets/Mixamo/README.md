@@ -35,3 +35,18 @@ To fix it at the source, re-download **Sprint** with:
 
 There is no true four-point block start in Mixamo's library; the set position is
 posed procedurally in `SkinnedRunner.poseBlockStart`.
+
+## Measured stride (why the gait still glides)
+
+Measured at runtime from the foot bone, for a 1.85 m athlete:
+
+| clip | stride / step | needed at 10.5 m/s |
+|---|---|---|
+| Fast Run (raw) | 0.88 m | ~2.2 m |
+| Fast Run + 1.55x swing boost | 1.21 m | ~2.2 m |
+
+The engine amplifies thigh swing and then paces the cycle from the measured
+stride, capped at ~5.5 steps/s. The rest shows as glide. To close the gap at
+the source, download **Sprint/Fast Run with Overdrive 100 and "In Place"
+UNCHECKED** - the baked ground travel is then measurable directly and the
+pacing can lock the foot exactly.

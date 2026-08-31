@@ -1,4 +1,5 @@
 import SceneKit
+import simd
 
 /// Common interface for the two athlete tiers: the procedural v3 figure and the
 /// Mixamo-rigged v4 runner. GameController drives either identically.
@@ -116,6 +117,13 @@ final class SkinnedRunner: AthleteFigure {
     /// Measured world metres of ground travel per second of clip playback at
     /// speed 1 — used to match leg turnover to actual ground speed (no skate).
     private var authoredRate: Float = 0
+    /// Measured foot travel per step, relative to the body (metres). This is the
+    /// clip's real stride length, and it is what ground speed must be matched to.
+    private var footExcursion: Float = 0
+    private var footMin: Float = 0
+    private var footMax: Float = 0
+    /// How much to exaggerate thigh swing (1 = raw clip).
+    private let strideBoost: Float = 1.55
     private var lastDT: Double = 1.0 / 60.0
     private var currentSpeed: Double = 0
     private var leftLegForward = true
@@ -263,15 +271,22 @@ final class SkinnedRunner: AthleteFigure {
         if currentClip == "launch", time >= launchEndsAt, mode == .running || mode == .decel {
             setClip(players["sprint"] != nil ? "sprint" : "running")
         }
-        // Pace the cycle by cadence. Matching baked travel exactly only works for
-        // clips exported with root motion, and even then Mixamo's stride is short
-        // enough that an exact match churns the legs at ~6 steps/s. Real sprint
-        // cadence is ~4.5-5.2 steps/s, so drive that directly and let the small
-        // remainder show as slide at top speed.
+        // Pace so the planted foot stays still: over one cycle the body must
+        // travel exactly two of the clip's strides, so
+        //   playback = duration · v / (2 · strideLength).
+        // Falls back to a cadence estimate until the stride has been measured.
         if let clip = currentClip, clip == "sprint" || clip == "running", let p = players[clip] {
-            let cadence = 1.55 + 1.05 * min(1.0, speed / 11.5)   // cycles per second
             let dur = clipDurations[clip] ?? 0.5
-            p.speed = CGFloat(max(0.5, min(1.8, cadence * dur)))
+            let target: Double
+            if footExcursion > 0.5 {
+                target = dur * speed / Double(2 * footExcursion)
+            } else {
+                target = (1.55 + 1.05 * min(1.0, speed / 11.5)) * dur
+            }
+            // Cap at a believable sprint cadence (~5.5 steps/s). The clip's
+            // stride is too short to fully close the gap, so the remainder shows
+            // as a little glide rather than a frantic shuffle.
+            p.speed = CGFloat(max(0.45, min(1.20, target)))
         }
         // New race begins when we go back to the blocks.
         if mode == .blocks { launchEndsAt = -1 }
@@ -313,12 +328,54 @@ final class SkinnedRunner: AthleteFigure {
                 }
             }
         }
+        // Exaggerate the leg swing. Mixamo's run cycles carry a short stride
+        // (~0.9 m/step); a sprinter at 11 m/s needs ~2.2 m. Amplifying each
+        // thigh's rotation away from its bind pose lengthens the visual stride,
+        // which the pacing below then converts into slower, longer strides.
+        if mode == .running || mode == .decel {
+            for name in ["LeftUpLeg", "RightUpLeg"] {
+                amplify(name, by: strideBoost)
+            }
+            for name in ["LeftLeg", "RightLeg"] {
+                amplify(name, by: 1 + (strideBoost - 1) * 0.45)
+            }
+        }
+
+        // Measure the clip's stride: how far the foot travels front-to-back
+        // relative to the body. Envelope followers decay slowly so the window
+        // tracks a full cycle without collapsing.
+        if mode == .running, let foot = poseBones["LeftFoot"] {
+            let rel = foot.presentation.worldPosition.z - root.presentation.worldPosition.z
+            let decay = Float(lastDT) * 0.12
+            footMin = min(rel, footMin + decay)
+            footMax = max(rel, footMax - decay)
+            let span = footMax - footMin
+            if span > 0.5, span < 4 {
+                footExcursion = footExcursion == 0 ? span : footExcursion * 0.95 + span * 0.05
+            }
+        }
+
         // Layer the drive lean / finish dip on the spine.
         guard mode == .running || mode == .decel, let s = spine1 else { return }
         let pitch = Float(max(0, lean - 0.20)) * 0.9
         guard pitch > 0.01 else { return }
         let delta = SCNQuaternion(sin(pitch / 2), 0, 0, cos(pitch / 2))
         s.orientation = SCNQuaternion.multiply(spine1Bind, delta)
+    }
+
+    /// Scale a bone's animated rotation away from its bind pose.
+    private func amplify(_ name: String, by k: Float) {
+        guard let n = poseBones[name], let bind = poseBind[name] else { return }
+        let bindQ = simd_quatf(ix: bind.x, iy: bind.y, iz: bind.z, r: bind.w)
+        let cur = n.presentation.orientation
+        let curQ = simd_quatf(ix: cur.x, iy: cur.y, iz: cur.z, r: cur.w)
+        let delta = curQ * bindQ.inverse
+        let angle = delta.angle
+        guard angle > 0.001, angle.isFinite else { return }
+        let axis = delta.axis
+        guard axis.x.isFinite, axis.y.isFinite, axis.z.isFinite else { return }
+        let boosted = simd_quatf(angle: angle * k, axis: axis) * bindQ
+        n.orientation = SCNQuaternion(boosted.imag.x, boosted.imag.y, boosted.imag.z, boosted.real)
     }
 
     // MARK: Block start (posed by hand — Mixamo has no track start)
