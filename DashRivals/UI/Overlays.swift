@@ -58,6 +58,14 @@ struct MenuOverlay: View {
                 }
                 .padding(.top, 10)
                 HStack(spacing: 6) {
+                    Text("ATHLETE")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                    characterChip("REMY", "remy")
+                    characterChip("Y BOT", "y bot")
+                }
+                .padding(.top, 4)
+                HStack(spacing: 6) {
                     Text("SPEED IN")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.45))
@@ -84,6 +92,17 @@ struct MenuOverlay: View {
                 .foregroundStyle(game.trackingStyle == t ? .black : .white.opacity(0.7))
                 .padding(.horizontal, 12).padding(.vertical, 5)
                 .background(game.trackingStyle == t ? Style.gold : Color.white.opacity(0.12),
+                            in: Capsule())
+        }
+    }
+
+    private func characterChip(_ label: String, _ name: String) -> some View {
+        Button { game.setCharacter(name) } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(game.characterName == name ? .black : .white.opacity(0.7))
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(game.characterName == name ? Style.gold : Color.white.opacity(0.12),
                             in: Capsule())
         }
     }

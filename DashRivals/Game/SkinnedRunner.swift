@@ -30,7 +30,7 @@ final class SkinnedRunner: AthleteFigure {
     private static func clipKey(for filename: String) -> String? {
         let n = filename.lowercased()
         if n.contains("to sprint") { return "launch" }
-        if n.contains("sprint") { return "sprint" }
+        if n.contains("fast run") || n.contains("sprint") { return "sprint" }
         if n.contains("crouch") { return "crouch" }
         if n.contains("victory") { return "victory" }
         if n.contains("running") { return "running" }
@@ -48,7 +48,9 @@ final class SkinnedRunner: AthleteFigure {
         var characters: [URL] = []
         for url in daeURLs {
             if let key = clipKey(for: url.lastPathComponent) {
-                if clipURLs[key] == nil { clipURLs[key] = url }
+                // A "Fast Run" download supersedes the stock Sprint clip.
+                let preferred = url.lastPathComponent.lowercased().contains("fast run")
+                if clipURLs[key] == nil || preferred { clipURLs[key] = url }
             } else {
                 characters.append(url)
             }
@@ -133,11 +135,13 @@ final class SkinnedRunner: AthleteFigure {
             container.addChildNode(child)
         }
 
-        // Mixamo units are centimeters; normalize to a ~1.85m athlete.
-        let (minB, maxB) = container.boundingBox
-        let height = maxB.y - minB.y
-        if height > 0.01 {
-            let s = 1.85 / height
+        // Normalize every rig to a ~1.85m athlete. Bounding boxes are unreliable
+        // here (they vary with each export's hierarchy), but the hips bone is
+        // consistent: a humanoid's hips sit at ~54% of standing height.
+        let hips0 = Self.findNode(in: container, suffix: "Hips")
+        let hipY = hips0?.position.y ?? 0
+        if hipY > 0.01 {
+            let s = Float(1.85 * 0.54) / hipY
             container.scale = SCNVector3(s, s, s)
         }
         root.addChildNode(container)
@@ -259,20 +263,15 @@ final class SkinnedRunner: AthleteFigure {
         if currentClip == "launch", time >= launchEndsAt, mode == .running || mode == .decel {
             setClip(players["sprint"] != nil ? "sprint" : "running")
         }
-        // Match leg turnover to real ground speed. The Sprint clip is authored at
-        // ~12.2 m/s of travel per cycle; playing it faster than the body actually
-        // moves is what makes a sprint read as frantic jogging (foot skate).
+        // Pace the cycle by cadence. Matching baked travel exactly only works for
+        // clips exported with root motion, and even then Mixamo's stride is short
+        // enough that an exact match churns the legs at ~6 steps/s. Real sprint
+        // cadence is ~4.5-5.2 steps/s, so drive that directly and let the small
+        // remainder show as slide at top speed.
         if let clip = currentClip, clip == "sprint" || clip == "running", let p = players[clip] {
-            if authoredRate > 0.5 {
-                // Exact foot-lock would need speed/authoredRate. Mixamo's "Sprint"
-                // only covers ~1.6m per step (a jog stride), so an exact match runs
-                // the legs at ~6 steps/s — the frantic look. Cap at a real sprint
-                // cadence (~4.9 steps/s) and accept a little slide at top speed.
-                let target = Float(speed) / authoredRate
-                p.speed = CGFloat(max(0.75, min(1.30, target)))
-            } else {
-                p.speed = 1.0        // until the first calibration lands
-            }
+            let cadence = 1.55 + 1.05 * min(1.0, speed / 11.5)   // cycles per second
+            let dur = clipDurations[clip] ?? 0.5
+            p.speed = CGFloat(max(0.5, min(1.8, cadence * dur)))
         }
         // New race begins when we go back to the blocks.
         if mode == .blocks { launchEndsAt = -1 }

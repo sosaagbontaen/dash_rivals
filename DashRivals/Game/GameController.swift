@@ -65,6 +65,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     // Broadcast replay
     @Published var replayActive = false
     @Published var windText = "+0.0"
+    // Character choice (Remy = human, Y Bot = Mixamo mannequin)
+    @Published var characterName = "remy"
     // Speed units
     @Published var useMph = false
     private var useMphInternal = false
@@ -139,7 +141,34 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         scene.rootNode.addChildNode(cameraDirector.node)
 
         engine.loadField()
-        // v4 skinned athletes when Mixamo assets are bundled; procedural v3 otherwise.
+        buildFigures()
+
+        bestTimeText = Self.formatPB(storedPB)
+        if let raw = UserDefaults.standard.string(forKey: "tracking"),
+           let t = TrackingStyle(rawValue: raw) {
+            trackingStyle = t
+            engine.tracking = t
+        }
+        useMph = UserDefaults.standard.bool(forKey: "useMph")
+        useMphInternal = useMph
+        characterName = UserDefaults.standard.string(forKey: "character") ?? "remy"
+        tapHaptic.prepare()
+        heavyHaptic.prepare()
+    }
+
+    /// Menu toggle: switch the tracking style (linear bars vs circular dot-chase).
+    func setTracking(_ t: TrackingStyle) {
+        trackingStyle = t
+        UserDefaults.standard.set(t.rawValue, forKey: "tracking")
+        onRender { [self] in engine.tracking = t }
+        audio.playTick()
+    }
+
+    /// (Re)create the eight athletes from whichever character is selected.
+    /// v4 skinned athletes when Mixamo assets are bundled; procedural v3 otherwise.
+    private func buildFigures() {
+        for fig in figures { fig.root.removeFromParentNode() }
+        figures.removeAll()
         let template = SkinnedRunner.loadTemplate()
         for r in engine.runners {
             let fig: AthleteFigure
@@ -153,23 +182,13 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             scene.rootNode.addChildNode(fig.root)
             figures.append(fig)
         }
-        bestTimeText = Self.formatPB(storedPB)
-        if let raw = UserDefaults.standard.string(forKey: "tracking"),
-           let t = TrackingStyle(rawValue: raw) {
-            trackingStyle = t
-            engine.tracking = t
-        }
-        useMph = UserDefaults.standard.bool(forKey: "useMph")
-        useMphInternal = useMph
-        tapHaptic.prepare()
-        heavyHaptic.prepare()
     }
 
-    /// Menu toggle: switch the tracking style (linear bars vs circular dot-chase).
-    func setTracking(_ t: TrackingStyle) {
-        trackingStyle = t
-        UserDefaults.standard.set(t.rawValue, forKey: "tracking")
-        onRender { [self] in engine.tracking = t }
+    /// Menu toggle: swap the athlete model (needs the field rebuilt).
+    func setCharacter(_ name: String) {
+        characterName = name
+        UserDefaults.standard.set(name, forKey: "character")
+        onRender { [self] in buildFigures() }
         audio.playTick()
     }
 
