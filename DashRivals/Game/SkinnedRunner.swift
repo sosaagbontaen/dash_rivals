@@ -32,6 +32,7 @@ final class SkinnedRunner: AthleteFigure {
         let n = filename.lowercased()
         if n.contains("to sprint") { return "launch" }
         if n.contains("fast run") || n.contains("sprint") { return "sprint" }
+        if n.contains("plank") || n.contains("start") { return "start" }
         if n.contains("crouch") { return "crouch" }
         if n.contains("victory") { return "victory" }
         if n.contains("running") { return "running" }
@@ -87,6 +88,27 @@ final class SkinnedRunner: AthleteFigure {
             anim.isRemovedOnCompletion = false
             anim.blendInDuration = 0.25
             anim.blendOutDuration = 0.25
+            if key == "start" {
+                // The block start is a *held frame* of real mocap, not a cycle:
+                // frame 38 = "on your marks" (hips low), frame 52 = "set"
+                // (hips up, hands planted). Frames chosen by running forward
+                // kinematics over every frame of the clip and picking the poses
+                // with the hands on the track and the feet split behind them.
+                for (variant, frame) in [("startMarks", 38.0), ("startSet", 52.0)] {
+                    guard let copy = group.copy() as? CAAnimationGroup else { continue }
+                    copy.timeOffset = frame / 30.0
+                    copy.isRemovedOnCompletion = false
+                    copy.fillMode = .forwards
+                    let held = SCNAnimation(caAnimation: copy)
+                    held.repeatCount = .greatestFiniteMagnitude
+                    held.isRemovedOnCompletion = false
+                    held.blendInDuration = 0.2
+                    held.blendOutDuration = 0.2
+                    clips[variant] = held
+                    durations[variant] = dur
+                }
+                continue
+            }
             clips[key] = anim
             durations[key] = dur
         }
@@ -228,11 +250,8 @@ final class SkinnedRunner: AthleteFigure {
             }
         case .idle: key = "idle"
         case .blocks, .set:
-            // Mixamo has no track block start ("Crouching Idle" is a stealth
-            // crouch with the hips at standing height), so the four-point set is
-            // authored here as a pose. It must be applied as an *animation*:
-            // SceneKit drives skinned bones from animations, and plain model
-            // writes to those bones are ignored.
+            // Prefer a held frame of the Start Plank mocap — a real four-point
+            // stance. Falls back to the hand-authored pose when it isn't bundled.
             key = nil
         case .celebrate: key = players["victory"] != nil ? "victory" : "idle"
         case .exhausted: key = players["crouch"] != nil ? "crouch" : "idle"
@@ -252,6 +271,7 @@ final class SkinnedRunner: AthleteFigure {
         // rig is never left with nothing driving it (that gap renders as a T-pose).
         if let k = key, let p = players[k] {
             if k == "launch" { p.speed = 1.25 }
+            if k.hasPrefix("start") { p.speed = 0 }   // hold the frame
             p.play()
         }
         if key == nil {
@@ -396,42 +416,19 @@ final class SkinnedRunner: AthleteFigure {
         n.orientation = SCNQuaternion.multiply(q, bind)
     }
 
-    /// Four-point sprint start, authored as pose animations on each bone.
-    /// setLift 0 = "on your marks" (hips low), 1 = "set" (hips up, weight forward).
+    /// Four-point sprint start: the Start Plank mocap sampled bone-by-bone
+    /// (see BlockPose.swift) and held as pose animations. Model-transform writes
+    /// to skinned bones are ignored by SceneKit, and it won't evaluate a clip at
+    /// speed 0, so a held frame has to be replayed as data.
     private func applyBlockPose(setLift: Float) {
-        let lift = max(0, min(1, setLift))
-        let front = leftLegForward ? "Left" : "Right"
-        let back = leftLegForward ? "Right" : "Left"
+        let pose = setLift > 0.5 ? BlockPose.set : BlockPose.marks
+        let hipsPos = setLift > 0.5 ? BlockPose.setHips : BlockPose.marksHips
 
-        // (bone, pitch, roll) — pitch rotates in the sagittal plane, parent frame.
-        var pose: [(String, Float, Float)] = [
-            ("Hips",   1.30 - 0.14 * lift, 0),
-            ("Spine",  -0.14, 0), ("Spine1", -0.12, 0), ("Spine2", -0.10, 0),
-            ("Neck",   -0.50, 0), ("Head",   -0.38, 0),
-            ("LeftArm",  -1.30, 1.50), ("RightArm", -1.30, -1.50),
-            ("LeftForeArm", -0.12, 0), ("RightForeArm", -0.12, 0),
-        ]
-        pose += [
-            ("\(front)UpLeg", 0.85 + 0.10 * lift, 0),
-            ("\(front)Leg",  -1.45 + 0.25 * lift, 0),
-            ("\(front)Foot",  0.30, 0),
-            ("\(back)UpLeg",  0.35 - 0.10 * lift, 0),
-            ("\(back)Leg",   -0.60 + 0.20 * lift, 0),
-            ("\(back)Foot",   0.50, 0),
-        ]
-
-        for (name, pitch, roll) in pose {
-            guard let bone = poseBones[name], let bind = poseBind[name] else { continue }
-            var q = SCNQuaternion(0, 0, 0, 1)
-            if pitch != 0 { q = SCNQuaternion.multiply(q, axisQ(1, 0, 0, pitch)) }
-            // For the arms, "roll" is applied about Y: with the chest pitched
-            // forward, its forward axis points at the track, which is where the
-            // hands need to go.
-            if roll != 0 { q = SCNQuaternion.multiply(q, axisQ(0, 0, 1, roll)) }
-            let target = SCNQuaternion.multiply(q, bind)
+        for (name, orientation) in pose {
+            guard let bone = poseBones[name] else { continue }
             let a = CABasicAnimation(keyPath: "orientation")
-            a.fromValue = NSValue(scnVector4: target)
-            a.toValue = NSValue(scnVector4: target)
+            a.fromValue = NSValue(scnVector4: orientation)
+            a.toValue = NSValue(scnVector4: orientation)
             a.duration = 1e8
             a.fillMode = .forwards
             a.isRemovedOnCompletion = false
@@ -439,13 +436,10 @@ final class SkinnedRunner: AthleteFigure {
             bone.addAnimation(a, forKey: "blockPose")
         }
 
-        // Hips drop into the crouch (and lift on "set").
         if let hips = hipsBone {
-            var p = hips.position
-            p.y = hipsBindY * (0.62 + 0.10 * lift)
             let a = CABasicAnimation(keyPath: "position")
-            a.fromValue = NSValue(scnVector3: p)
-            a.toValue = NSValue(scnVector3: p)
+            a.fromValue = NSValue(scnVector3: hipsPos)
+            a.toValue = NSValue(scnVector3: hipsPos)
             a.duration = 1e8
             a.fillMode = .forwards
             a.isRemovedOnCompletion = false
