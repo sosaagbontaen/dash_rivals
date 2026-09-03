@@ -129,6 +129,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     private let autopilot = CommandLine.arguments.contains("-autopilot")
 #if DEBUG
     private let blockProbe = CommandLine.arguments.contains("-blockprobe")
+    private let dipDemo = CommandLine.arguments.contains("-dipdemo")
     private var blockProbeTick = 0
 #endif
     private let autopilotOnce = CommandLine.arguments.contains("-aponce")
@@ -794,6 +795,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // The dip at the line.
             if r.athlete.isPlayer, sceneTime < playerLeanUntil { lean = 0.85 }
             figureLeans[i] = r.velocity > 0.2 ? lean : 0.1
+#if DEBUG
+            if dipDemo, r.velocity > 0.2 { figureLeans[i] = 0.9 }
+#endif
             // Feed the *displayed* speed: during impact-freeze and the slow-motion
             // finish the world advances at timeScale, so the legs must cycle at
             // timeScale too, or they churn while the ground crawls.

@@ -144,7 +144,16 @@ final class SkinnedRunner: AthleteFigure {
     private var footMin: Float = 0
     private var footMax: Float = 0
     /// How much to exaggerate thigh swing (1 = raw clip).
-    private let strideBoost: Float = 1.85
+    private let strideBoost: Float = SkinnedRunner.strideBoostArg
+#if DEBUG
+    static let dipProbe = CommandLine.arguments.contains("-dipprobe")
+#endif
+    /// Overridable so the stride boost can be A/B'd from the command line.
+    static let strideBoostArg: Float = {
+        if let i = CommandLine.arguments.firstIndex(of: "-stride"), i + 1 < CommandLine.arguments.count,
+           let v = Float(CommandLine.arguments[i + 1]) { return v }
+        return 1.85
+    }()
     private var lastDT: Double = 1.0 / 60.0
     private var currentSpeed: Double = 0
     private var leftLegForward = true
@@ -172,6 +181,10 @@ final class SkinnedRunner: AthleteFigure {
         if hipY > 0.01 {
             let s = Float(1.85 * 0.54) / hipY
             container.scale = SCNVector3(s, s, s)
+            // Hinge leans about the hips, not the feet. The pivot shifts the mesh
+            // down by the same amount, so position adds it straight back.
+            container.pivot = SCNMatrix4MakeTranslation(0, hipY, 0)
+            container.position = SCNVector3(0, hipY * s, 0)
         }
         root.addChildNode(container)
 
@@ -254,10 +267,13 @@ final class SkinnedRunner: AthleteFigure {
             // stance. Falls back to the hand-authored pose when it isn't bundled.
             key = nil
         case .celebrate: key = players["victory"] != nil ? "victory" : "idle"
-        case .exhausted: key = players["crouch"] != nil ? "crouch" : "idle"
+        // Not the "crouch" clip: Mixamo's Crouching Idle is a combat squat, and
+        // eight athletes dropping into it at the line reads as a second block start.
+        case .exhausted: key = "idle"
         }
         setClip(key)
         if mode == .blocks || mode == .set {
+            characterContainer?.eulerAngles.x = 0
             applyBlockPose(setLift: mode == .set ? 1 : 0)
         } else {
             for (_, bone) in poseBones { bone.removeAnimation(forKey: "blockPose") }
@@ -372,16 +388,31 @@ final class SkinnedRunner: AthleteFigure {
             let span = footMax - footMin
             if span > 0.5, span < 4 {
                 footExcursion = footExcursion == 0 ? span : footExcursion * 0.95 + span * 0.05
-
+#if DEBUG
+                if SkinnedRunner.dipProbe { print(String(format: "STRIDE k=%.2f excursion=%.3f", strideBoost, footExcursion)) }
+#endif
             }
         }
 
-        // Layer the drive lean / finish dip on the spine.
-        guard mode == .running || mode == .decel, let s = spine1 else { return }
-        let pitch = Float(max(0, lean - 0.20)) * 0.9
-        guard pitch > 0.01 else { return }
-        let delta = SCNQuaternion(sin(pitch / 2), 0, 0, cos(pitch / 2))
-        s.orientation = SCNQuaternion.multiply(spine1Bind, delta)
+        // Drive lean and finish dip. These have to live on the container, not the
+        // spine: a clip owns every bone it animates, and neither a model write nor
+        // a held bone animation displaces it (both measured as exact no-ops on the
+        // head's world position). The container is the one node no clip touches -
+        // it is what root-motion compensation already steers - and its pivot sits
+        // at hip height, so the body hinges at the waist rather than the feet.
+        guard mode == .running || mode == .decel else {
+            characterContainer?.eulerAngles.x = 0
+            return
+        }
+        let pitch = min(0.7, Float(max(0, lean - 0.20)) * 1.1)
+        characterContainer?.eulerAngles.x = pitch
+#if DEBUG
+        if SkinnedRunner.dipProbe, let head = poseBones["Head"], let hips = hipsBone {
+            let h = head.presentation.worldPosition
+            let hp = hips.presentation.worldPosition
+            print(String(format: "HEAD pitch=%.2f dz=%.3f dy=%.3f", pitch, h.z - hp.z, h.y - hp.y))
+        }
+#endif
     }
 
     /// Scale a bone's animated rotation away from its bind pose.
@@ -397,6 +428,7 @@ final class SkinnedRunner: AthleteFigure {
         guard axis.x.isFinite, axis.y.isFinite, axis.z.isFinite else { return }
         let boosted = simd_quatf(angle: angle * k, axis: axis) * bindQ
         n.orientation = SCNQuaternion(boosted.imag.x, boosted.imag.y, boosted.imag.z, boosted.real)
+
     }
 
     // MARK: Block start (posed by hand — Mixamo has no track start)

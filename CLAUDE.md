@@ -49,6 +49,9 @@ xcrun simctl launch booted com.dashrivals.poc -autopilot -apq 0.9
 - `-blockprobe` — logs lane 1's foot/toe bones in world space while the rig
   holds the marks and set poses. The starting-block pedal marks in
   `Stadium.startingBlock` come from this; re-run it if `BlockPose` changes.
+- `-dipprobe` — logs the head's offset from the hips each frame; `-dipdemo`
+  pins the lean wide open so the two can be A/B'd.
+- `-stride <k>` — overrides `SkinnedRunner.strideBoost` (default 1.85).
 
 A `tune*.swift` script in the session scratchpad mirrors the player model for headless
 tuning; keep `RaceEngine` formulas in sync if retuning.
@@ -105,3 +108,21 @@ the skinned mesh (clips speed-slaved to stride rate, spine-layered lean via
 renderer(_:didApplyAnimationsAtTime:)); with no assets the game silently uses
 the procedural v3 `RunnerFigure`. Both conform to `AthleteFigure`. Expect a
 bone-axis/tint tuning pass the first time real assets land.
+
+### SceneKit rules this rig actually obeys
+
+Measured, not assumed — verify behaviourally (does a bone's world position
+move?) rather than by reading a value back, because read-backs lie here.
+
+- A clip attached to the container **owns every bone it animates**. Writing
+  `bone.orientation`, or adding a held animation to the bone, is a silent
+  no-op — both measured as exact zeroes on the head's world position.
+- So the drive lean and the finish dip live on `characterContainer`, whose
+  `pivot` sits at hip height (the body hinges at the waist, not the feet).
+  That node is the same one root-motion compensation steers; no clip touches it.
+- `amplify()` is the exception that proves the rule: it re-writes bones every
+  frame from their own presentation values and *does* land (A/B'd: stride
+  0.84 m at k=1.0 vs 1.36 m at k=1.85, via `-stride`).
+- A pose held at `speed = 0` is not evaluated at all, so `BlockPose` replays
+  sampled frames as animations — and it only works because `setClip(nil)`
+  stops every clip first.
