@@ -33,8 +33,10 @@ To fix it at the source, re-download **Sprint** with:
 - **Character Arm-Space** ~35 (tighter, sprint-like arm carriage)
 - "In Place" either way — root motion is compensated in code
 
-There is no true four-point block start in Mixamo's library; the set position is
-posed procedurally in `SkinnedRunner.poseBlockStart`.
+There is no true four-point block start in Mixamo's library. **Start Plank**
+stands in: frames 38 and 52 are sampled into `BlockPose.swift` and held as
+pose animations. It isn't a real block start, so the front foot slides ~0.14 m
+between marks and set — the front pedal is placed halfway between the two.
 
 ## Measured stride (why the gait still glides)
 

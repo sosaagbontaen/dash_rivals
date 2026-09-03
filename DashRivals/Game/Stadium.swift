@@ -128,21 +128,37 @@ final class Stadium {
         let dark = flatMaterial(UIColor(white: 0.13, alpha: 1))
         let accent = flatMaterial(UIColor(red: 0.95, green: 0.55, blue: 0.05, alpha: 1))
 
-        let rail = SCNBox(width: 0.07, height: 0.05, length: 0.95, chamferRadius: 0.01)
+        // Pedal marks measured off the held block pose (see SkinnedRunner.footProbe):
+        // the front (left) foot lands right of the runner's centre line, the rear
+        // (right) foot left of it. The front foot slides ~0.14m between "marks" and
+        // "set" — the mocap isn't a true block start — so its pedal splits the two.
+        let pedals: [(x: Float, z: Float)] = [(0.25, -0.290), (-0.15, -1.150)]
+
+        // One spine running rear pedal to front pedal. The mocap stance is wider
+        // than a real block's, so a straight centre rail would miss both feet;
+        // angling it between the marks reads as purpose-built hardware.
+        let dx = pedals[0].x - pedals[1].x
+        let dz = pedals[0].z - pedals[1].z
+        let span = (dx * dx + dz * dz).squareRoot()
+        let rail = SCNBox(width: 0.07, height: 0.05, length: CGFloat(span), chamferRadius: 0.01)
         rail.materials = [dark]
         let railNode = SCNNode(geometry: rail)
-        railNode.position = SCNVector3(0, 0.03, -0.39)
+        railNode.position = SCNVector3((pedals[0].x + pedals[1].x) / 2, 0.03,
+                                       (pedals[0].z + pedals[1].z) / 2)
+        railNode.eulerAngles = SCNVector3(0, atan2(dx, dz), 0)
         block.addChildNode(railNode)
 
-        for (i, dz) in [Float(0.0), Float(-0.78)].enumerated() {
+        for mark in pedals {
             let pedal = SCNBox(width: 0.16, height: 0.04, length: 0.18, chamferRadius: 0.01)
             pedal.materials = [accent]
             let p = SCNNode(geometry: pedal)
-            p.position = SCNVector3(i == 0 ? -0.09 : 0.09, 0.075, dz)
+            // 0.065 puts the plate's lower edge on the track, not floating over it.
+            p.position = SCNVector3(mark.x, 0.065, mark.z)
             p.eulerAngles = SCNVector3(-0.7, 0, 0)
             block.addChildNode(p)
         }
-        block.position = SCNVector3(x, 0, -0.38)
+
+        block.position = SCNVector3(x, 0, 0)
         return block
     }
 

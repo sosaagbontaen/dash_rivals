@@ -46,6 +46,9 @@ xcrun simctl launch booted com.dashrivals.poc -autopilot -apq 0.9
 - `-apq <0..1>` — autopilot tracking quality (lag 0.06+(1-q)·0.5s, noise sd
   0.008+(1-q)·0.15, over-press bias (1-q)·0.12). q=0.85 finishes ≈ 10.0–10.1.
 - `-aponce` — stop after one race and hold on the results screen.
+- `-blockprobe` — logs lane 1's foot/toe bones in world space while the rig
+  holds the marks and set poses. The starting-block pedal marks in
+  `Stadium.startingBlock` come from this; re-run it if `BlockPose` changes.
 
 A `tune*.swift` script in the session scratchpad mirrors the player model for headless
 tuning; keep `RaceEngine` formulas in sync if retuning.

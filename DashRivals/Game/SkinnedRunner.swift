@@ -190,7 +190,7 @@ final class SkinnedRunner: AthleteFigure {
                      "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
                      "LeftForeArm", "RightForeArm", "LeftHand", "RightHand",
                      "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg",
-                     "LeftFoot", "RightFoot"] {
+                     "LeftFoot", "RightFoot", "LeftToeBase", "RightToeBase"] {
             if let n = Self.findNode(in: container, suffix: name) {
                 poseBones[name] = n
                 poseBind[name] = n.orientation
@@ -447,6 +447,23 @@ final class SkinnedRunner: AthleteFigure {
             hips.addAnimation(a, forKey: "blockPoseY")
         }
     }
+
+#if DEBUG
+    /// Where the feet actually land in the held block pose, world space. The
+    /// pose is driven by animations, so only the presentation nodes carry it.
+    /// This is what the starting-block pedals are placed from.
+    func footProbe() -> String? {
+        guard mode == .blocks || mode == .set else { return nil }
+        let rw = root.presentation.worldPosition
+        var out = String(format: "mode=%@ root x=%.3f z=%.3f", "\(mode)", rw.x, rw.z)
+        for n in ["LeftFoot", "LeftToeBase", "RightFoot", "RightToeBase"] {
+            guard let b = poseBones[n] else { out += " | \(n)=MISSING"; continue }
+            let w = b.presentation.worldPosition
+            out += String(format: " | %@ dx=%.3f z=%.3f y=%.3f", n, w.x - rw.x, w.z, w.y)
+        }
+        return out
+    }
+#endif
 }
 
 private extension SCNQuaternion {

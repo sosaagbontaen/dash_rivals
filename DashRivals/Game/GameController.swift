@@ -127,6 +127,10 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
 
     // Autopilot (DEBUG tuning aid): launch with -autopilot [-apq 0.9] [-aponce]
     private let autopilot = CommandLine.arguments.contains("-autopilot")
+#if DEBUG
+    private let blockProbe = CommandLine.arguments.contains("-blockprobe")
+    private var blockProbeTick = 0
+#endif
     private let autopilotOnce = CommandLine.arguments.contains("-aponce")
     private var autoQuality: Double {
         if let i = CommandLine.arguments.firstIndex(of: "-apq"), i + 1 < CommandLine.arguments.count,
@@ -413,6 +417,12 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
         for (i, fig) in figures.enumerated() {
             fig.postAnimationAdjust(lean: figureLeans[i])
         }
+#if DEBUG
+        if blockProbe, let s = figures.first as? SkinnedRunner {
+            blockProbeTick += 1
+            if blockProbeTick % 15 == 0, let line = s.footProbe() { print("BLOCKPROBE \(line)") }
+        }
+#endif
     }
 
     private func processInputs() {
