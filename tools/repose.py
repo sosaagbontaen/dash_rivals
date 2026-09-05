@@ -18,29 +18,34 @@ ROOT_Z = -0.35                                           # runner root in world
 
 # ---------------------------------------------------------------- geometry
 # World-space, forward = +z, lane centre x = 0, start line z = 0.
-PEDAL = {                    # x, plate base z, plate angle (rad), ball distance up the plate
-    "L": dict(x=+0.06, zb=-0.60, phi=np.radians(45), t=0.16, gamma=np.radians(30)),
-    "R": dict(x=-0.06, zb=-0.88, phi=np.radians(62), t=0.15, gamma=np.radians(45)),
+PEDAL = {                    # x, plate base z, plate angle (rad)
+    "L": dict(x=+0.06, zb=-0.60, phi=np.radians(45)),
+    "R": dict(x=-0.06, zb=-0.88, phi=np.radians(62)),
 }
+PLATE_LEN = 0.24             # along the face; matches Stadium.startingBlock
+BALL_T = 0.15                # ball of the foot this far up the face
+TOE_T = 0.23                 # toe tip just under the top edge
 FOOT_LEN = np.linalg.norm(rig.bind[rig.by_short("LeftToeBase")][:3, 3]) * S
 
-# Angle of the ankle->ball segment above the sole, from the flat-footed bind pose.
+# The ankle joint sits above and behind the ball. From the flat-footed bind
+# pose: how far along the sole (back from the ball) and how far off it.
 _wb = rig.world({n: rig.bind[n] for n in rig.order})
 _a = _wb[rig.by_short("LeftFoot")][:3, 3] * S
 _b = _wb[rig.by_short("LeftToeBase")][:3, 3] * S
-FOOT_ALPHA = np.arctan2(_a[1] - _b[1], _b[2] - _a[2])   # ankle sits above/behind the ball
+ANKLE_BACK = _b[2] - _a[2]     # along the sole
+ANKLE_UP = _a[1] - _b[1]       # off the sole
 
 
 def pedal_targets(side):
+    """Sole flat on the plate: ball and toe tip on the face, ankle off it."""
     p = PEDAL[side]
-    ramp = np.array([0, np.sin(p["phi"]), np.cos(p["phi"])])
+    sole = np.array([0, np.sin(p["phi"]), np.cos(p["phi"])])      # up the face
+    normal = np.array([0, np.cos(p["phi"]), -np.sin(p["phi"])])   # off the face, toward the athlete
     base = np.array([p["x"], 0.02, p["zb"]])
-    ball = base + p["t"] * ramp
-    # Ball of the foot on the plate; the heel drops back and down off it at
-    # angle gamma above the track, the way a sprinter loads the pedal.
-    seg = np.array([0, np.sin(p["gamma"]), np.cos(p["gamma"])])
-    ankle = ball - FOOT_LEN * seg
-    return ankle, ball
+    ball = base + BALL_T * sole
+    toe = base + TOE_T * sole
+    ankle = ball - ANKLE_BACK * sole + ANKLE_UP * normal
+    return ankle, ball, toe
 
 
 def w2r(v):
@@ -110,7 +115,7 @@ def report(locals_, label):
     w = rig.world(locals_)
     def W(b): return r2w(w[rig.by_short(b)][:3, 3])
     print(f"--- {label}")
-    for b in ["Hips", "LeftFoot", "LeftToeBase", "RightLeg", "RightFoot", "RightToeBase",
+    for b in ["Hips", "LeftLeg", "LeftFoot", "LeftToeBase", "LeftToe_End", "RightLeg", "RightFoot", "RightToeBase", "RightToe_End",
               "LeftArm", "LeftHand", "LeftHandMiddle4", "RightHand", "RightHandMiddle4", "Head"]:
         p = W(b); print("   %-16s x=%+.3f y=%.3f z=%+.3f" % (b, *p))
     # arm extension + knee angles
@@ -132,10 +137,10 @@ def build(frame, hips_xyz, hips_pitch, hand_z, extra_targets=(), arm_reg=0.02):
 
     # Legs: ankle + ball on the pedal. Knee treated as a hinge (lock twist/abduction).
     for side, key in (("Left", "L"), ("Right", "R")):
-        ankle, ball = pedal_targets(key)
-        tg = [(side + "Foot", ankle, 4.0), (side + "ToeBase", ball, 4.0)]
+        ankle, ball, toe = pedal_targets(key)
+        tg = [(side + "Foot", ankle, 4.0), (side + "ToeBase", ball, 4.0), (side + "Toe_End", toe, 3.0)]
         tg += [t for t in extra_targets if t[0].startswith(side)]
-        solve(loc, [side + "UpLeg", side + "Leg", side + "Foot"], tg,
+        solve(loc, [side + "UpLeg", side + "Leg", side + "Foot", side + "ToeBase"], tg,
               fixed_axes={side + "Leg": [1, 2]}, reg=0.01)
 
     # Arms: wrist just off the track, knuckles forward-and-out so the fingertips
@@ -197,17 +202,34 @@ if __name__ == "__main__":
     import sys
     if "--sweep" in sys.argv:
         sweep(); sys.exit()
-    print("foot len %.3f  alpha %.1f°" % (FOOT_LEN, np.degrees(FOOT_ALPHA)))
+    print("foot len %.3f  ankle back %.3f up %.3f" % (FOOT_LEN, ANKLE_BACK, ANKLE_UP))
     for k in PEDAL:
-        a, b = pedal_targets(k)
-        print(" pedal %s ankle=(%+.3f %.3f %+.3f) ball=(%+.3f %.3f %+.3f)" % (k, *a, *b))
+        a, b, t = pedal_targets(k)
+        print(" pedal %s ankle=(%+.3f %.3f %+.3f) ball=(%+.3f %.3f %+.3f) toe=(%+.3f %.3f %+.3f)" % (k, *a, *b, *t))
 
     # Set: hips high, both knees off the ground, arms near straight.
     sets = build(52, hips_xyz=[-0.05, 0.72, -0.60], hips_pitch=0.0, hand_z=-0.19)
     report(sets, "SET")
-    # Marks: hips low, rear knee on the track beside the front foot.
-    marks = build(38, hips_xyz=[-0.05, 0.50, -0.62], hips_pitch=-0.22, hand_z=-0.19,
-                  extra_targets=[("RightLeg", [-0.10, 0.07, -0.53], 3.0)])
-    report(marks, "MARKS")
+    # Marks: hips low and back, rear knee on the track beside the front foot.
+    # Pick the hip placement that opens the front knee most while the rear
+    # knee still reaches the track.
+    best = None
+    for hy, hz, kz in [(0.50, -0.62, -0.53), (0.50, -0.70, -0.60), (0.53, -0.74, -0.62), (0.56, -0.78, -0.64)]:
+        cand = build(38, hips_xyz=[-0.05, hy, hz], hips_pitch=-0.22, hand_z=-0.19,
+                     extra_targets=[("RightLeg", [-0.10, 0.07, kz], 3.0)])
+        w = rig.world(cand)
+        def W(b): return r2w(w[rig.by_short(b)][:3, 3])
+        hip, kn, an = W("LeftUpLeg"), W("LeftLeg"), W("LeftFoot")
+        v1, v2 = hip - kn, an - kn
+        knee = np.degrees(np.arccos(v1 @ v2 / np.linalg.norm(v1) / np.linalg.norm(v2)))
+        rk = W("RightLeg")[1]
+        # Arms must still reach the track: a fully locked arm means the hands can't.
+        sh, el, wr = W("LeftArm"), W("LeftForeArm"), W("LeftHand")
+        ext = np.linalg.norm(wr - sh) / (np.linalg.norm(el - sh) + np.linalg.norm(wr - el))
+        print("   marks hips y=%.2f z=%.2f: front knee %.0f°, rear knee y=%.3f, arm %.0f%%" % (hy, hz, knee, rk, ext * 100))
+        if rk < 0.12 and ext < 0.96 and (best is None or knee > best[0]):
+            best = (knee, cand)
+    marks = best[1]
+    report(marks, "MARKS (chosen)")
     if "--write" in sys.argv:
         emit(marks, sets)

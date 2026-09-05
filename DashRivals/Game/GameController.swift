@@ -131,7 +131,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
     private let blockProbe = CommandLine.arguments.contains("-blockprobe")
     private let dipDemo = CommandLine.arguments.contains("-dipdemo")
     private var blockProbeTick = 0
+    private let gunProbe = CommandLine.arguments.contains("-gunprobe")
 #endif
+    private var flightLevel: Float = 0
     private let autopilotOnce = CommandLine.arguments.contains("-aponce")
     private var autoQuality: Double {
         if let i = CommandLine.arguments.firstIndex(of: "-apq"), i + 1 < CommandLine.arguments.count,
@@ -403,8 +405,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // The replay runs at replayRate; the leg cycle has to match it.
             fig.update(phase: s.ph, speed: s.v * Self.replayRate,
                        lean: s.v > 0.2 ? lean : 0.1, time: sceneTime)
-            fig.setFlight(intensity: Float(max(0, min(1, (s.v - 9.4) / 1.5))),
-                          speedFactor: Float(Self.replayRate))
+            fig.setFlight(intensity: 0, speedFactor: 1)   // broadcast replay: no FX
         }
         let pd = frame.snaps[Roster.playerIndex].d
         cameraDirector.update(dt: dt, time: sceneTime, introT: phaseTime,
@@ -421,6 +422,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             fig.postAnimationAdjust(lean: figureLeans[i])
         }
 #if DEBUG
+        if gunProbe, let s = figures.first as? SkinnedRunner, let line = s.gunProbe() { print("GUNPROBE \(line)") }
         if blockProbe, let s = figures.first as? SkinnedRunner {
             blockProbeTick += 1
             if blockProbeTick % 15 == 0, let line = s.footProbe() { print("BLOCKPROBE \(line)") }
@@ -627,6 +629,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
 
     private func finishCelebration() {
         replaying = false
+        flightLevel = 0
         figures.forEach { $0.setFlight(intensity: 0, speedFactor: 1) }
         publish { $0.replayActive = false }
         // Return everyone to their true final positions after the replay scrub.
@@ -806,9 +809,13 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // timeScale too, or they churn while the ground crawls.
             fig.update(phase: r.stridePhase, speed: r.velocity * timeScale,
                        lean: figureLeans[i], time: sceneTime)
-            // Fire off the spikes once they're flying (~9.5 m/s up), out at the line.
-            let flight = r.finishTime == nil ? Float(max(0, min(1, (r.velocity - 9.4) / 1.5))) : 0
-            fig.setFlight(intensity: flight * (r.athlete.isPlayer ? 1 : 0.7), speedFactor: Float(timeScale))
+            // Fire off the spikes from FULL FLIGHT to the line - the player's own
+            // view of top gear, and the hook for a future power-up.
+            if r.athlete.isPlayer {
+                let flying = r.finishTime == nil && engine.playerLaunched && engine.sprintPhase != .drive
+                flightLevel += ((flying ? 1 : 0) - flightLevel) * 0.08
+                fig.setFlight(intensity: flightLevel, speedFactor: Float(timeScale))
+            }
 
             // Footstep audio + haptic: two steps per stride cycle.
             let stepCount = Int(r.stridePhase * 2)

@@ -75,7 +75,8 @@ class Rig:
         """Local matrices at an animation frame (bind where unanimated)."""
         out = {}
         for n in self.order:
-            out[n] = self.anim[n][frame] if n in self.anim else self.bind[n]
+            # Copies: callers edit these in place, and the cache must stay pristine.
+            out[n] = (self.anim[n][frame] if n in self.anim else self.bind[n]).copy()
         return out
 
     def world(self, locals_):

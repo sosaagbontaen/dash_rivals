@@ -136,7 +136,7 @@ final class Stadium {
         struct Pedal { let x: Float; let baseZ: Float; let angle: Float }
         let pedals = [Pedal(x: 0.06, baseZ: -0.60, angle: 45 * .pi / 180),
                       Pedal(x: -0.06, baseZ: -0.88, angle: 62 * .pi / 180)]
-        let plateLen: Float = 0.20
+        let plateLen: Float = 0.24   // along the face; PLATE_LEN in tools/repose.py
 
         // Centre rail: extruded aluminium, spiked plate at the front end.
         let rail = SCNBox(width: 0.05, height: 0.035, length: 0.62, chamferRadius: 0.006)

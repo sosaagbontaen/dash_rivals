@@ -136,12 +136,15 @@ final class SkinnedRunner: AthleteFigure {
                 let rw = root.presentation.worldPosition
                 launchAnchorX = (hw.x - rw.x) - hipsBindX
                 launchAnchorZ = (hw.z - rw.z) - hipsBindZ
+                runStart = lastTime
             }
             applyMode()
         }
     }
     private var launchAnchorX: Float = 0
     private var launchAnchorZ: Float = 0
+    private var leanRamp: Float = 0
+    private var runStart: Double = -10
 
     // Full-flight FX: one emitter node per foot, parented to the (unscaled)
     // root and re-seated on the toe bone every frame. Particles are world-space.
@@ -252,6 +255,21 @@ final class SkinnedRunner: AthleteFigure {
                 poseBind[name] = n.orientation
             }
         }
+        // The block poses as container-level clips, authored in the same shape
+        // as the mocap groups (one sub-animation per bone, same key paths), so
+        // setClip crossfades marks -> set -> launch instead of cutting. A pose
+        // held on the bones themselves can't blend with a container clip.
+        if let ref = template.clips["sprint"] ?? template.clips["running"] ?? template.clips["launch"] {
+            for (key, pose, hips) in [("poseMarks", BlockPose.marks, BlockPose.marksHips),
+                                      ("poseSet", BlockPose.set, BlockPose.setHips)] {
+                guard let clip = Self.makePoseClip(like: ref, pose: pose, hipsPosition: hips, in: container) else { continue }
+                let player = SCNAnimationPlayer(animation: clip)
+                player.stop()
+                container.addAnimationPlayer(player, forKey: key)
+                players[key] = player
+                clipDurations[key] = 1
+            }
+        }
         hipsBone = Self.findNode(in: container, suffix: "Hips")
         if let h = hipsBone {
             // Where the hips sit in root space at bind pose — the anchor the
@@ -280,6 +298,56 @@ final class SkinnedRunner: AthleteFigure {
         applyMode()
     }
 
+    /// One-second constant clip holding `pose`: every bone the reference clip
+    /// animates gets a keyframe animation on the same key path, valued at the
+    /// pose (or the bone's bind transform when the pose doesn't list it, which
+    /// is what keeps fingers straight on the track).
+    private static func makePoseClip(like ref: SCNAnimation, pose: [(String, SCNQuaternion)],
+                                     hipsPosition: SCNVector3, in container: SCNNode) -> SCNAnimation? {
+        guard let group = CAAnimation(scnAnimation: ref) as? CAAnimationGroup,
+              let subs = group.animations else { return nil }
+        let quats = Dictionary(pose.map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a })
+        var out: [CAAnimation] = []
+        for sub in subs {
+            guard let kp = (sub as? CAPropertyAnimation)?.keyPath, kp.hasSuffix(".transform") else { continue }
+            // "/mixamorig:Hips.transform" -> "mixamorig:Hips"
+            let nodeName = String(kp.dropLast(".transform".count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard let node = findNode(in: container, suffix: nodeName) else { continue }
+            var m = node.transform
+            // Rigs name bones "mixamorig:Hips" or "mixamorig_Hips"; match the
+            // pose's short name at a ':' or '_' boundary.
+            let short = quats.keys.first { name in
+                nodeName.hasSuffix(name) && (nodeName.count == name.count
+                    || [":", "_"].contains(nodeName[nodeName.index(nodeName.endIndex, offsetBy: -name.count - 1)]))
+            }
+            if let short, let q = quats[short] {
+                var t = SCNMatrix4(simd_float4x4(simd_quatf(ix: q.x, iy: q.y, iz: q.z, r: q.w)))
+                let p = short == "Hips" ? hipsPosition : node.position
+                t.m41 = p.x; t.m42 = p.y; t.m43 = p.z
+                m = t
+            }
+            let a = CAKeyframeAnimation(keyPath: kp)
+            a.values = [NSValue(scnMatrix4: m), NSValue(scnMatrix4: m)]
+            a.keyTimes = [0, 1]
+            a.duration = 1
+            a.isRemovedOnCompletion = false
+            a.fillMode = .forwards
+            out.append(a)
+        }
+        guard !out.isEmpty else { return nil }
+        let g = CAAnimationGroup()
+        g.animations = out
+        g.duration = 1
+        g.isRemovedOnCompletion = false
+        g.fillMode = .forwards
+        let anim = SCNAnimation(caAnimation: g)
+        anim.repeatCount = .greatestFiniteMagnitude
+        anim.isRemovedOnCompletion = false
+        anim.blendInDuration = 0.2
+        anim.blendOutDuration = 0.25
+        return anim
+    }
+
     private static func findNode(in node: SCNNode, suffix: String) -> SCNNode? {
         var found: SCNNode? = nil
         node.enumerateHierarchy { n, stop in
@@ -300,24 +368,31 @@ final class SkinnedRunner: AthleteFigure {
             // Explode out of the crouch with the transition clip, then loop the sprint.
             if launchEndsAt < 0, players["launch"] != nil, mode == .running {
                 key = "launch"
-                launchEndsAt = lastTime + (clipDurations["launch"] ?? 0.8) / 1.25
+                // Cut it short: the clip finishes nearly upright, and the sprint
+                // clip plus the drive lean carry the rest.
+                launchEndsAt = lastTime + min(0.26, (clipDurations["launch"] ?? 0.8) / 1.25)
             } else {
                 key = players["sprint"] != nil ? "sprint" : "running"
             }
         case .idle: key = "idle"
-        case .blocks, .set:
-            // Prefer a held frame of the Start Plank mocap — a real four-point
-            // stance. Falls back to the hand-authored pose when it isn't bundled.
-            key = nil
+        case .blocks: key = players["poseMarks"] != nil ? "poseMarks" : nil
+        case .set: key = players["poseSet"] != nil ? "poseSet" : nil
         case .celebrate: key = players["victory"] != nil ? "victory" : "idle"
         // Not the "crouch" clip: Mixamo's Crouching Idle is a combat squat, and
         // eight athletes dropping into it at the line reads as a second block start.
         case .exhausted: key = "idle"
         }
+        // Root-motion compensation leaves the container wherever the last race
+        // ended; the block poses are authored against a zeroed container.
+        if mode == .blocks, let c = characterContainer {
+            c.position.x = 0
+            c.position.z = 0
+            c.eulerAngles.x = 0
+            leanRamp = 0
+        }
         setClip(key)
-        if mode == .blocks || mode == .set {
-            characterContainer?.eulerAngles.x = 0
-            applyBlockPose(setLift: mode == .set ? 1 : 0)
+        if (mode == .blocks || mode == .set), key == nil {
+            applyBlockPose(setLift: mode == .set ? 1 : 0)   // no reference clip: bone-level fallback
         } else {
             for (_, bone) in poseBones { bone.removeAnimation(forKey: "blockPose") }
             hipsBone?.removeAnimation(forKey: "blockPoseY")
@@ -326,21 +401,44 @@ final class SkinnedRunner: AthleteFigure {
 
     private func setClip(_ key: String?) {
         guard key != currentClip else { return }
-        // Start the incoming clip first, then blend the outgoing one away, so the
-        // rig is never left with nothing driving it (that gap renders as a T-pose).
-        if let k = key, let p = players[k] {
+        // SceneKit's blendIn/blendOut never crossfaded these clips (measured as
+        // one-frame cuts), so the fade is driven by hand: the incoming player is
+        // re-added so it evaluates last, then its blendFactor ramps 0 -> 1 over
+        // the outgoing player at full weight, which stops when the ramp ends.
+        if let k = key, let p = players[k], let c = characterContainer {
             if k == "launch" { p.speed = 1.25 }
             if k.hasPrefix("start") { p.speed = 0 }   // hold the frame
+            c.removeAnimation(forKey: k)
+            c.addAnimationPlayer(p, forKey: k)
+            p.blendFactor = 0
             p.play()
+            fadeIn = p
+            fadeOut = currentClip.flatMap { players[$0] }
+            fadeStart = lastTime
         }
         if key == nil {
             // Hand-posed modes: every clip must be fully detached, otherwise the
             // held animation pose (fillMode .forwards) overrides model writes.
             for (_, p) in players { p.stop() }
-        } else if let old = currentClip, let p = players[old] {
-            p.stop(withBlendOutDuration: 0.25)
+            fadeIn = nil; fadeOut = nil
         }
         currentClip = key
+    }
+
+    private var fadeIn: SCNAnimationPlayer?
+    private var fadeOut: SCNAnimationPlayer?
+    private var fadeStart: Double = 0
+    private let fadeDuration: Double = 0.22
+
+    private func stepCrossfade(time: Double) {
+        guard let incoming = fadeIn else { return }
+        let f = CGFloat(max(0, min(1, (time - fadeStart) / fadeDuration)))
+        incoming.blendFactor = f
+        if f >= 1 {
+            fadeOut?.stop()
+            fadeOut?.blendFactor = 1
+            fadeIn = nil; fadeOut = nil
+        }
     }
 
     /// Ready the figure for a new race (lets the launch clip fire again).
@@ -354,6 +452,7 @@ final class SkinnedRunner: AthleteFigure {
         lastDT = max(1.0 / 240.0, min(0.1, time - lastTime))
         lastTime = time
         currentSpeed = speed
+        stepCrossfade(time: time)
         if currentClip == "launch", time >= launchEndsAt, mode == .running || mode == .decel {
             setClip(players["sprint"] != nil ? "sprint" : "running")
         }
@@ -455,7 +554,15 @@ final class SkinnedRunner: AthleteFigure {
             characterContainer?.eulerAngles.x = 0
             return
         }
-        let pitch = min(0.7, Float(max(0, lean - 0.20)) * 1.1)
+        // The launch clip carries its own drive posture; stacking a whole-body
+        // pitch on its crouch put heads on the track. Hold off until the sprint
+        // clip takes over, then ease the lean in.
+        if currentClip == "launch" {
+            leanRamp = 0
+        } else {
+            leanRamp = min(1, leanRamp + Float(lastDT) / 0.45)
+        }
+        let pitch = min(0.5, Float(max(0, lean - 0.20)) * 1.0) * leanRamp
         characterContainer?.eulerAngles.x = pitch
 #if DEBUG
         if SkinnedRunner.dipProbe, let head = poseBones["Head"], let hips = hipsBone {
@@ -532,6 +639,18 @@ final class SkinnedRunner: AthleteFigure {
     }
 
 #if DEBUG
+    /// Per-frame shape of the athlete across the gun: is the set -> launch ->
+    /// sprint hand-off a curve or a step?
+    func gunProbe() -> String? {
+        guard mode == .set || (mode == .running && lastTime - runStart < 1.6),
+              let head = poseBones["Head"], let hips = hipsBone else { return nil }
+        let h = head.presentation.worldPosition, p = hips.presentation.worldPosition
+        let rw = root.presentation.worldPosition
+        return String(format: "t=%.3f mode=%@ clip=%@ headY=%.3f hipsY=%.3f hipsZ=%+.3f pitch=%.2f",
+                      lastTime - runStart, "\(mode)", currentClip ?? "-", h.y, p.y, p.z - rw.z,
+                      characterContainer?.eulerAngles.x ?? 0)
+    }
+
     /// Where the feet actually land in the held block pose, world space. The
     /// pose is driven by animations, so only the presentation nodes carry it.
     /// This is what the starting-block pedals are placed from.
@@ -539,10 +658,11 @@ final class SkinnedRunner: AthleteFigure {
         guard mode == .blocks || mode == .set else { return nil }
         let rw = root.presentation.worldPosition
         var out = String(format: "mode=%@ root x=%.3f z=%.3f", "\(mode)", rw.x, rw.z)
-        for n in ["LeftFoot", "LeftToeBase", "RightFoot", "RightToeBase"] {
+        for n in ["LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase", "RightLeg", "RightFoot", "RightToeBase"] {
             guard let b = poseBones[n] else { out += " | \(n)=MISSING"; continue }
             let w = b.presentation.worldPosition
-            out += String(format: " | %@ dx=%.3f z=%.3f y=%.3f", n, w.x - rw.x, w.z, w.y)
+            let sc = b.presentation.scale
+            out += String(format: " | %@ dx=%.3f z=%.3f y=%.3f s=%.2f", n, w.x - rw.x, w.z, w.y, sc.y)
         }
         return out
     }
