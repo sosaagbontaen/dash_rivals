@@ -156,6 +156,9 @@ final class SkinnedRunner: AthleteFigure {
     private var flightIntensity: Float = 0
 
     func setFlight(intensity: Float, speedFactor: Float) {
+#if DEBUG
+        if SkinnedRunner.noFX { return }
+#endif
         if flightNodes.isEmpty {
             guard intensity > 0 else { return }
             for _ in 0..<2 {
@@ -195,6 +198,10 @@ final class SkinnedRunner: AthleteFigure {
     private let strideBoost: Float = SkinnedRunner.strideBoostArg
 #if DEBUG
     static let dipProbe = CommandLine.arguments.contains("-dipprobe")
+#endif
+#if DEBUG
+    static let noFade = CommandLine.arguments.contains("-nofade")
+    static let noFX = CommandLine.arguments.contains("-nofx")
 #endif
     /// Overridable so the stride boost can be A/B'd from the command line.
     static let strideBoostArg: Float = {
@@ -237,7 +244,12 @@ final class SkinnedRunner: AthleteFigure {
         root.addChildNode(container)
 
         clipDurations = template.clipDurations
-        for key in template.clips.keys.sorted() {
+        // Players evaluate in the order they're added, later ones on top. Put
+        // each later race stage UNDER the stage before it (sprint lowest), so a
+        // forward transition can fade the outgoing clip away over the incoming
+        // one without ever writing to the clip that carries the race.
+        let stageOrder = ["sprint", "running", "launch", "idle", "victory", "crouch", "startMarks", "startSet"]
+        for key in stageOrder where template.clips[key] != nil {
             guard let anim = template.clips[key] else { continue }
             let player = SCNAnimationPlayer(animation: anim)
             player.stop()
@@ -264,8 +276,8 @@ final class SkinnedRunner: AthleteFigure {
         // setClip crossfades marks -> set -> launch instead of cutting. A pose
         // held on the bones themselves can't blend with a container clip.
         if let ref = template.clips["sprint"] ?? template.clips["running"] ?? template.clips["launch"] {
-            for (key, pose, hips) in [("poseMarks", BlockPose.marks, BlockPose.marksHips),
-                                      ("poseSet", BlockPose.set, BlockPose.setHips)] {
+            for (key, pose, hips) in [("poseSet", BlockPose.set, BlockPose.setHips),
+                                      ("poseMarks", BlockPose.marks, BlockPose.marksHips)] {
                 guard let clip = Self.makePoseClip(like: ref, pose: pose, hipsPosition: hips, in: container) else { continue }
                 let player = SCNAnimationPlayer(animation: clip)
                 player.stop()
@@ -373,9 +385,9 @@ final class SkinnedRunner: AthleteFigure {
             // Explode out of the crouch with the transition clip, then loop the sprint.
             if launchEndsAt < 0, players["launch"] != nil, mode == .running {
                 key = "launch"
-                // Cut it short: the clip finishes nearly upright, and the sprint
-                // clip plus the drive lean carry the rest.
-                launchEndsAt = lastTime + min(0.26, (clipDurations["launch"] ?? 0.8) / 1.25)
+                // Full length: the hand-off to the sprint is a hard cut (see
+                // setClip), and the clip's last frame is the closest it gets.
+                launchEndsAt = lastTime + (clipDurations["launch"] ?? 0.5) / 1.25
             } else {
                 key = players["sprint"] != nil ? "sprint" : "running"
             }
@@ -406,31 +418,36 @@ final class SkinnedRunner: AthleteFigure {
 
     private func setClip(_ key: String?) {
         guard key != currentClip else { return }
-        // SceneKit's blendIn/blendOut never crossfaded these clips (measured as
-        // one-frame cuts), so the fade is driven by hand: the incoming player is
-        // re-added so it evaluates last, then its blendFactor ramps 0 -> 1 over
-        // the outgoing player at full weight, which stops when the ramp ends.
-        // Finish any fade still in flight before starting the next.
         if fadeIn != nil { finishCrossfade() }
         if let k = key, let p = players[k] {
             if k == "launch" { p.speed = 1.25 }
             if k.hasPrefix("start") { p.speed = 0 }   // hold the frame
-            // Players evaluate in the order they were added, later ones on top.
-            // Removing and re-adding to reorder kills the player (it never plays
-            // again), so instead fade whichever side gives a clean mix: the
-            // incoming one up if it sits on top, else the outgoing one down.
             let outgoing = currentClip.flatMap { players[$0] }
-            let inOnTop = currentClip.map { (playerOrder.firstIndex(of: k) ?? 0) > (playerOrder.firstIndex(of: $0) ?? 0) } ?? true
-            fadeIncoming = inOnTop
-            p.blendFactor = inOnTop ? 0 : 1
+            let outOnTop = currentClip.map { (playerOrder.firstIndex(of: $0) ?? 0) > (playerOrder.firstIndex(of: k) ?? 0) } ?? false
+            // The clip that carries the race is never written to after play():
+            // ramping a playing player's blendFactor stalls its animation a few
+            // seconds later (measured). Only the outgoing player is faded, and
+            // only when it evaluates on top; otherwise it's a cut.
+            p.blendFactor = 1
             p.play()
-            fadeIn = p
-            fadeOut = outgoing
-            fadeStart = lastTime
+            // Measured: a clip that is playing while another player's blendFactor
+            // is ramped stalls a few seconds later (with the launch, the set pose,
+            // any of them). So the sprint is never on the receiving end of a fade:
+            // it starts fresh from a hard cut once every fade has finished.
+            let carriesRace = (k == "sprint" || k == "running")
+            var fade = outOnTop && !carriesRace
+#if DEBUG
+            if SkinnedRunner.noFade { fade = false }
+#endif
+            if fade, let o = outgoing {
+                fadeIn = p
+                fadeOut = o
+                fadeStart = lastTime
+            } else {
+                outgoing?.stop()
+            }
         }
         if key == nil {
-            // Hand-posed modes: every clip must be fully detached, otherwise the
-            // held animation pose (fillMode .forwards) overrides model writes.
             for (_, p) in players { p.stop() }
             fadeIn = nil; fadeOut = nil
         }
@@ -440,21 +457,22 @@ final class SkinnedRunner: AthleteFigure {
     private var playerOrder: [String] = []
     private var fadeIn: SCNAnimationPlayer?
     private var fadeOut: SCNAnimationPlayer?
-    private var fadeIncoming = true
     private var fadeStart: Double = 0
     private let fadeDuration: Double = 0.22
 
     private func stepCrossfade(time: Double) {
         guard fadeIn != nil else { return }
         let f = CGFloat(max(0, min(1, (time - fadeStart) / fadeDuration)))
-        if fadeIncoming { fadeIn?.blendFactor = f } else { fadeOut?.blendFactor = 1 - f }
+        fadeOut?.blendFactor = 1 - f
         if f >= 1 { finishCrossfade() }
     }
 
     private func finishCrossfade() {
+        // Stop only. Never write blendFactor to a stopped player: it re-engages
+        // the player, and a re-engaged launch clip (held on its last frame,
+        // evaluated above the sprint) is the "runners frozen mid-stride" bug.
+        // blendFactor is reset to 1 right before the player's next play().
         fadeOut?.stop()
-        fadeOut?.blendFactor = 1
-        fadeIn?.blendFactor = 1
         fadeIn = nil; fadeOut = nil
     }
 
@@ -584,9 +602,11 @@ final class SkinnedRunner: AthleteFigure {
 #if DEBUG
         if SkinnedRunner.dipProbe, let sp = players["sprint"], let foot = poseBones["LeftFoot"], let c = characterContainer {
             let rel = foot.presentation.worldPosition.z - root.presentation.worldPosition.z
-            print(String(format: "SPRINT clip=%@ speed=%.2f blend=%.2f paused=%d attached=%d footRelZ=%+.3f",
+            let la = players["launch"]
+            print(String(format: "SPRINT clip=%@ speed=%.2f blend=%.2f paused=%d attached=%d footRelZ=%+.3f launchPaused=%d launchBlend=%.2f",
                          currentClip ?? "-", sp.speed, sp.blendFactor, sp.paused ? 1 : 0,
-                         c.animationPlayer(forKey: "sprint") === sp ? 1 : 0, rel))
+                         c.animationPlayer(forKey: "sprint") === sp ? 1 : 0, rel,
+                         (la?.paused ?? true) ? 1 : 0, la?.blendFactor ?? -1))
         }
         if SkinnedRunner.dipProbe, let head = poseBones["Head"], let hips = hipsBone {
             let h = head.presentation.worldPosition

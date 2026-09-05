@@ -132,10 +132,19 @@ move?) rather than by reading a value back, because read-backs lie here.
 - `SCNAnimation.blendInDuration/blendOutDuration` never crossfaded these
   clips (measured: one-frame cuts at the gun and at launch→sprint), and worse,
   they let the bind pose leak in mid-fade. They are zeroed; `setClip` fades by
-  hand on `blendFactor`. Players evaluate in the order they were added
-  (`playerOrder`): fade the incoming one up if it's on top, else the outgoing
-  one down. **Never remove and re-add a player to reorder it — it never plays
-  again** (that was the "runners frozen, dragged along the track" bug).
+  hand on the **outgoing** player's `blendFactor` only. Players evaluate in
+  the order they were added (`playerOrder`, sprint lowest), so each race stage
+  sits under the one before it and the outgoing clip fades away on top.
+- **A clip that is playing while any player's `blendFactor` is being ramped
+  stalls a few seconds later** — measured with the launch, the set pose, and a
+  direct set→sprint fade; "animated for the first strides, then frozen
+  mid-pose" is this. So the sprint is never on the receiving end of a fade:
+  set fades into the launch clip (disposable), the launch runs full length,
+  and the sprint starts fresh from a hard cut. `-nofade` is the kill switch.
+- **Never remove and re-add a player to reorder it — it never plays again.**
 - The launch clip (Crouched To Sprinting) starts from a standing crouch and
-  ends nearly upright; it's cut at 0.26 s and no whole-body pitch is applied
-  while it runs. The container's root-motion offset is zeroed on `.blocks`.
+  ends nearly upright; no whole-body pitch is applied while it runs. The
+  container's root-motion offset is zeroed on `.blocks`.
+- Xcode builds from this working directory, so mid-bisect edits leak into the
+  user's builds. Verify with a probe across the *whole* race (the first
+  ~200 frames always animate), and commit before saying "fixed".
