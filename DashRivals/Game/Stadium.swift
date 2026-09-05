@@ -126,36 +126,67 @@ final class Stadium {
     private func startingBlock(atLaneX x: Float) -> SCNNode {
         let block = SCNNode()
         let dark = flatMaterial(UIColor(white: 0.13, alpha: 1))
+        let rubber = flatMaterial(UIColor(white: 0.06, alpha: 1))
+        let metal = flatMaterial(UIColor(white: 0.62, alpha: 1))
         let accent = flatMaterial(UIColor(red: 0.95, green: 0.55, blue: 0.05, alpha: 1))
 
-        // Pedal marks measured off the held block pose (see SkinnedRunner.footProbe):
-        // the front (left) foot lands right of the runner's centre line, the rear
-        // (right) foot left of it. The front foot slides ~0.14m between "marks" and
-        // "set" — the mocap isn't a true block start — so its pedal splits the two.
-        let pedals: [(x: Float, z: Float)] = [(0.25, -0.290), (-0.15, -1.150)]
+        // Geometry shared with repose.py, which IK's the block pose onto these
+        // pedals: plate base (z, 2cm up), plate angle from the track, lateral
+        // offset from the rail. Front pedal shallow, rear pedal steep.
+        struct Pedal { let x: Float; let baseZ: Float; let angle: Float }
+        let pedals = [Pedal(x: 0.06, baseZ: -0.60, angle: 45 * .pi / 180),
+                      Pedal(x: -0.06, baseZ: -0.88, angle: 62 * .pi / 180)]
+        let plateLen: Float = 0.20
 
-        // One spine running rear pedal to front pedal. The mocap stance is wider
-        // than a real block's, so a straight centre rail would miss both feet;
-        // angling it between the marks reads as purpose-built hardware.
-        let dx = pedals[0].x - pedals[1].x
-        let dz = pedals[0].z - pedals[1].z
-        let span = (dx * dx + dz * dz).squareRoot()
-        let rail = SCNBox(width: 0.07, height: 0.05, length: CGFloat(span), chamferRadius: 0.01)
-        rail.materials = [dark]
+        // Centre rail: extruded aluminium, spiked plate at the front end.
+        let rail = SCNBox(width: 0.05, height: 0.035, length: 0.62, chamferRadius: 0.006)
+        rail.materials = [metal]
         let railNode = SCNNode(geometry: rail)
-        railNode.position = SCNVector3((pedals[0].x + pedals[1].x) / 2, 0.03,
-                                       (pedals[0].z + pedals[1].z) / 2)
-        railNode.eulerAngles = SCNVector3(0, atan2(dx, dz), 0)
+        railNode.position = SCNVector3(0, 0.0175, -0.72)
         block.addChildNode(railNode)
+        let spikePlate = SCNBox(width: 0.10, height: 0.012, length: 0.08, chamferRadius: 0.003)
+        spikePlate.materials = [dark]
+        let spikeNode = SCNNode(geometry: spikePlate)
+        spikeNode.position = SCNVector3(0, 0.006, -0.42)
+        block.addChildNode(spikeNode)
 
-        for mark in pedals {
-            let pedal = SCNBox(width: 0.16, height: 0.04, length: 0.18, chamferRadius: 0.01)
-            pedal.materials = [accent]
-            let p = SCNNode(geometry: pedal)
-            // 0.065 puts the plate's lower edge on the track, not floating over it.
-            p.position = SCNVector3(mark.x, 0.065, mark.z)
-            p.eulerAngles = SCNVector3(-0.7, 0, 0)
-            block.addChildNode(p)
+        for p in pedals {
+            let ramp = SCNVector3(0, sin(p.angle), cos(p.angle))
+            let base = SCNVector3(p.x, 0.02, p.baseZ)
+            let mid = SCNVector3(base.x + ramp.x * plateLen / 2,
+                                 base.y + ramp.y * plateLen / 2,
+                                 base.z + ramp.z * plateLen / 2)
+
+            // Plate: coloured body with a black rubber face the shoe presses on.
+            let plate = SCNBox(width: 0.13, height: 0.022, length: CGFloat(plateLen), chamferRadius: 0.004)
+            plate.materials = [accent]
+            let plateNode = SCNNode(geometry: plate)
+            plateNode.position = mid
+            plateNode.eulerAngles = SCNVector3(-p.angle, 0, 0)
+            block.addChildNode(plateNode)
+
+            let face = SCNBox(width: 0.115, height: 0.008, length: CGFloat(plateLen - 0.02), chamferRadius: 0.003)
+            face.materials = [rubber]
+            let faceNode = SCNNode(geometry: face)
+            // Sit on the +y face of the plate, i.e. up the plate's local normal.
+            let n = SCNVector3(0, cos(p.angle), -sin(p.angle))
+            faceNode.position = SCNVector3(mid.x + n.x * 0.014, mid.y + n.y * 0.014, mid.z + n.z * 0.014)
+            faceNode.eulerAngles = SCNVector3(-p.angle, 0, 0)
+            block.addChildNode(faceNode)
+
+            // Bracket from the rail up to the back of the plate, plus the clamp
+            // that locks it to a rail notch.
+            let postH = mid.y
+            let post = SCNBox(width: 0.035, height: CGFloat(postH), length: 0.035, chamferRadius: 0.004)
+            post.materials = [dark]
+            let postNode = SCNNode(geometry: post)
+            postNode.position = SCNVector3(p.x, postH / 2, mid.z - 0.04)
+            block.addChildNode(postNode)
+            let clamp = SCNBox(width: CGFloat(abs(p.x) + 0.07), height: 0.03, length: 0.05, chamferRadius: 0.004)
+            clamp.materials = [dark]
+            let clampNode = SCNNode(geometry: clamp)
+            clampNode.position = SCNVector3(p.x / 2, 0.04, mid.z - 0.04)
+            block.addChildNode(clampNode)
         }
 
         block.position = SCNVector3(x, 0, 0)

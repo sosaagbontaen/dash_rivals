@@ -34,9 +34,12 @@ To fix it at the source, re-download **Sprint** with:
 - "In Place" either way — root motion is compensated in code
 
 There is no true four-point block start in Mixamo's library. **Start Plank**
-stands in: frames 38 and 52 are sampled into `BlockPose.swift` and held as
-pose animations. It isn't a real block start, so the front foot slides ~0.14 m
-between marks and set — the front pedal is placed halfway between the two.
+stands in: frames 38 (marks) and 52 (set) are retargeted onto real block
+geometry by `tools/repose.py` — legs IK'd onto the pedals, hands onto the
+track behind the line, hips lifted — and baked into `BlockPose.swift`, which
+plays back as held pose animations. The pedal geometry lives in both the
+script and `Stadium.startingBlock`; change one, change the other, re-run
+`python3 tools/repose.py --write` and check with `-blockprobe`.
 
 ## Measured stride (why the gait still glides)
 

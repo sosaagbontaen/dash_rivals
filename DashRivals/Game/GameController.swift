@@ -403,6 +403,8 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // The replay runs at replayRate; the leg cycle has to match it.
             fig.update(phase: s.ph, speed: s.v * Self.replayRate,
                        lean: s.v > 0.2 ? lean : 0.1, time: sceneTime)
+            fig.setFlight(intensity: Float(max(0, min(1, (s.v - 9.4) / 1.5))),
+                          speedFactor: Float(Self.replayRate))
         }
         let pd = frame.snaps[Roster.playerIndex].d
         cameraDirector.update(dt: dt, time: sceneTime, introT: phaseTime,
@@ -625,6 +627,7 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
 
     private func finishCelebration() {
         replaying = false
+        figures.forEach { $0.setFlight(intensity: 0, speedFactor: 1) }
         publish { $0.replayActive = false }
         // Return everyone to their true final positions after the replay scrub.
         for (i, r) in engine.runners.enumerated() {
@@ -803,6 +806,9 @@ final class GameController: NSObject, ObservableObject, SCNSceneRendererDelegate
             // timeScale too, or they churn while the ground crawls.
             fig.update(phase: r.stridePhase, speed: r.velocity * timeScale,
                        lean: figureLeans[i], time: sceneTime)
+            // Fire off the spikes once they're flying (~9.5 m/s up), out at the line.
+            let flight = r.finishTime == nil ? Float(max(0, min(1, (r.velocity - 9.4) / 1.5))) : 0
+            fig.setFlight(intensity: flight * (r.athlete.isPlayer ? 1 : 0.7), speedFactor: Float(timeScale))
 
             // Footstep audio + haptic: two steps per stride cycle.
             let stepCount = Int(r.stridePhase * 2)

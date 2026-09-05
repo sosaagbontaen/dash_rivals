@@ -10,10 +10,14 @@ protocol AthleteFigure: AnyObject {
     /// Called from renderer(_:didApplyAnimationsAtTime:) — the only safe point to
     /// layer procedural adjustments (lean/dip) on top of running clips.
     func postAnimationAdjust(lean: Double)
+    /// Full-flight fire/smoke off the spikes. 0 = off. speedFactor slaves the
+    /// particle clock to the world's (slow-mo finish, replay).
+    func setFlight(intensity: Float, speedFactor: Float)
 }
 
 extension RunnerFigure: AthleteFigure {
     func postAnimationAdjust(lean: Double) {}   // fully procedural already
+    func setFlight(intensity: Float, speedFactor: Float) {}
 }
 
 /// v4 athlete: a Mixamo-rigged skinned mesh (Collada export), animated by the
@@ -121,7 +125,46 @@ final class SkinnedRunner: AthleteFigure {
 
     let root = SCNNode()
     var mode: RunnerFigure.Mode = .idle {
-        didSet { if mode != oldValue { applyMode() } }
+        didSet {
+            guard mode != oldValue else { return }
+            if mode == .running, oldValue == .set || oldValue == .blocks,
+               let h = hipsBone {
+                // The block pose parks the hips ~0.25m behind where the launch
+                // clip's hips land; carry that offset into the compensation and
+                // decay it, so the gun drives the body out rather than snapping it.
+                let hw = h.presentation.worldPosition
+                let rw = root.presentation.worldPosition
+                launchAnchorX = (hw.x - rw.x) - hipsBindX
+                launchAnchorZ = (hw.z - rw.z) - hipsBindZ
+            }
+            applyMode()
+        }
+    }
+    private var launchAnchorX: Float = 0
+    private var launchAnchorZ: Float = 0
+
+    // Full-flight FX: one emitter node per foot, parented to the (unscaled)
+    // root and re-seated on the toe bone every frame. Particles are world-space.
+    private var flightNodes: [SCNNode] = []
+    private var flames: [SCNParticleSystem] = []
+    private var smokes: [SCNParticleSystem] = []
+    private var flightIntensity: Float = 0
+
+    func setFlight(intensity: Float, speedFactor: Float) {
+        if flightNodes.isEmpty {
+            guard intensity > 0 else { return }
+            for _ in 0..<2 {
+                let n = SCNNode()
+                let f = LaneFX.flame(), sm = LaneFX.smoke()
+                n.addParticleSystem(f)
+                n.addParticleSystem(sm)
+                root.addChildNode(n)
+                flightNodes.append(n); flames.append(f); smokes.append(sm)
+            }
+        }
+        flightIntensity = intensity
+        for f in flames { f.birthRate = CGFloat(340 * intensity); f.speedFactor = CGFloat(max(0.05, speedFactor)) }
+        for sm in smokes { sm.birthRate = CGFloat(55 * intensity); sm.speedFactor = CGFloat(max(0.05, speedFactor)) }
     }
 
     private var players: [String: SCNAnimationPlayer] = [:]
@@ -344,8 +387,11 @@ final class SkinnedRunner: AthleteFigure {
             // position and the simulation owns every meter of travel.
             let hw = hips.presentation.worldPosition
             let rw = root.presentation.worldPosition
-            let driftX = (hw.x - rw.x) - hipsBindX
-            let driftZ = (hw.z - rw.z) - hipsBindZ
+            let k = Float(exp(-lastDT / 0.16))
+            launchAnchorX *= k
+            launchAnchorZ *= k
+            let driftX = (hw.x - rw.x) - (hipsBindX + launchAnchorX)
+            let driftZ = (hw.z - rw.z) - (hipsBindZ + launchAnchorZ)
             if driftX.isFinite, driftZ.isFinite {
                 var p = container.position
                 p.x -= driftX
@@ -363,6 +409,11 @@ final class SkinnedRunner: AthleteFigure {
                     }
                 }
             }
+        }
+        if flightIntensity > 0, flightNodes.count == 2,
+           let lt = poseBones["LeftToeBase"], let rt = poseBones["RightToeBase"] {
+            flightNodes[0].position = root.convertPosition(lt.presentation.worldPosition, from: nil)
+            flightNodes[1].position = root.convertPosition(rt.presentation.worldPosition, from: nil)
         }
         // Exaggerate the leg swing. Mixamo's run cycles carry a short stride
         // (~0.9 m/step); a sprinter at 11 m/s needs ~2.2 m. Amplifying each
