@@ -124,6 +124,18 @@ move?) rather than by reading a value back, because read-backs lie here.
 - `amplify()` is the exception that proves the rule: it re-writes bones every
   frame from their own presentation values and *does* land (A/B'd: stride
   0.84 m at k=1.0 vs 1.36 m at k=1.85, via `-stride`).
-- A pose held at `speed = 0` is not evaluated at all, so `BlockPose` replays
-  sampled frames as animations — and it only works because `setClip(nil)`
-  stops every clip first.
+- A pose held at `speed = 0` is not evaluated at all. `BlockPose` is baked by
+  `tools/repose.py` (IK onto the pedal geometry) and played back as a
+  **container-level constant clip** built in the same shape as the mocap
+  groups (`makePoseClip`), so it can crossfade with the launch clip. A pose
+  held on the bones themselves cannot blend with a container clip.
+- `SCNAnimation.blendInDuration/blendOutDuration` never crossfaded these
+  clips (measured: one-frame cuts at the gun and at launch→sprint), and worse,
+  they let the bind pose leak in mid-fade. They are zeroed; `setClip` fades by
+  hand on `blendFactor`. Players evaluate in the order they were added
+  (`playerOrder`): fade the incoming one up if it's on top, else the outgoing
+  one down. **Never remove and re-add a player to reorder it — it never plays
+  again** (that was the "runners frozen, dragged along the track" bug).
+- The launch clip (Crouched To Sprinting) starts from a standing crouch and
+  ends nearly upright; it's cut at 0.26 s and no whole-body pitch is applied
+  while it runs. The container's root-motion offset is zeroed on `.blocks`.

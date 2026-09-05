@@ -90,8 +90,10 @@ final class SkinnedRunner: AthleteFigure {
             let anim = SCNAnimation(caAnimation: group)
             anim.repeatCount = key == "launch" ? 1 : .greatestFiniteMagnitude
             anim.isRemovedOnCompletion = false
-            anim.blendInDuration = 0.25
-            anim.blendOutDuration = 0.25
+            // Crossfades are driven by hand on blendFactor (see setClip); the
+            // built-in blend would let the bind pose leak in mid-fade.
+            anim.blendInDuration = 0
+            anim.blendOutDuration = 0
             if key == "start" {
                 // The block start is a *held frame* of real mocap, not a cycle:
                 // frame 38 = "on your marks" (hips low), frame 52 = "set"
@@ -106,8 +108,8 @@ final class SkinnedRunner: AthleteFigure {
                     let held = SCNAnimation(caAnimation: copy)
                     held.repeatCount = .greatestFiniteMagnitude
                     held.isRemovedOnCompletion = false
-                    held.blendInDuration = 0.2
-                    held.blendOutDuration = 0.2
+                    held.blendInDuration = 0
+                    held.blendOutDuration = 0
                     clips[variant] = held
                     durations[variant] = dur
                 }
@@ -235,11 +237,13 @@ final class SkinnedRunner: AthleteFigure {
         root.addChildNode(container)
 
         clipDurations = template.clipDurations
-        for (key, anim) in template.clips {
+        for key in template.clips.keys.sorted() {
+            guard let anim = template.clips[key] else { continue }
             let player = SCNAnimationPlayer(animation: anim)
             player.stop()
             container.addAnimationPlayer(player, forKey: key)
             players[key] = player
+            playerOrder.append(key)
         }
 
         spine1 = Self.findNode(in: container, suffix: "Spine1")
@@ -267,6 +271,7 @@ final class SkinnedRunner: AthleteFigure {
                 player.stop()
                 container.addAnimationPlayer(player, forKey: key)
                 players[key] = player
+                playerOrder.append(key)
                 clipDurations[key] = 1
             }
         }
@@ -343,8 +348,8 @@ final class SkinnedRunner: AthleteFigure {
         let anim = SCNAnimation(caAnimation: g)
         anim.repeatCount = .greatestFiniteMagnitude
         anim.isRemovedOnCompletion = false
-        anim.blendInDuration = 0.2
-        anim.blendOutDuration = 0.25
+        anim.blendInDuration = 0
+        anim.blendOutDuration = 0
         return anim
     }
 
@@ -405,15 +410,22 @@ final class SkinnedRunner: AthleteFigure {
         // one-frame cuts), so the fade is driven by hand: the incoming player is
         // re-added so it evaluates last, then its blendFactor ramps 0 -> 1 over
         // the outgoing player at full weight, which stops when the ramp ends.
-        if let k = key, let p = players[k], let c = characterContainer {
+        // Finish any fade still in flight before starting the next.
+        if fadeIn != nil { finishCrossfade() }
+        if let k = key, let p = players[k] {
             if k == "launch" { p.speed = 1.25 }
             if k.hasPrefix("start") { p.speed = 0 }   // hold the frame
-            c.removeAnimation(forKey: k)
-            c.addAnimationPlayer(p, forKey: k)
-            p.blendFactor = 0
+            // Players evaluate in the order they were added, later ones on top.
+            // Removing and re-adding to reorder kills the player (it never plays
+            // again), so instead fade whichever side gives a clean mix: the
+            // incoming one up if it sits on top, else the outgoing one down.
+            let outgoing = currentClip.flatMap { players[$0] }
+            let inOnTop = currentClip.map { (playerOrder.firstIndex(of: k) ?? 0) > (playerOrder.firstIndex(of: $0) ?? 0) } ?? true
+            fadeIncoming = inOnTop
+            p.blendFactor = inOnTop ? 0 : 1
             p.play()
             fadeIn = p
-            fadeOut = currentClip.flatMap { players[$0] }
+            fadeOut = outgoing
             fadeStart = lastTime
         }
         if key == nil {
@@ -425,20 +437,25 @@ final class SkinnedRunner: AthleteFigure {
         currentClip = key
     }
 
+    private var playerOrder: [String] = []
     private var fadeIn: SCNAnimationPlayer?
     private var fadeOut: SCNAnimationPlayer?
+    private var fadeIncoming = true
     private var fadeStart: Double = 0
     private let fadeDuration: Double = 0.22
 
     private func stepCrossfade(time: Double) {
-        guard let incoming = fadeIn else { return }
+        guard fadeIn != nil else { return }
         let f = CGFloat(max(0, min(1, (time - fadeStart) / fadeDuration)))
-        incoming.blendFactor = f
-        if f >= 1 {
-            fadeOut?.stop()
-            fadeOut?.blendFactor = 1
-            fadeIn = nil; fadeOut = nil
-        }
+        if fadeIncoming { fadeIn?.blendFactor = f } else { fadeOut?.blendFactor = 1 - f }
+        if f >= 1 { finishCrossfade() }
+    }
+
+    private func finishCrossfade() {
+        fadeOut?.stop()
+        fadeOut?.blendFactor = 1
+        fadeIn?.blendFactor = 1
+        fadeIn = nil; fadeOut = nil
     }
 
     /// Ready the figure for a new race (lets the launch clip fire again).
@@ -565,6 +582,12 @@ final class SkinnedRunner: AthleteFigure {
         let pitch = min(0.5, Float(max(0, lean - 0.20)) * 1.0) * leanRamp
         characterContainer?.eulerAngles.x = pitch
 #if DEBUG
+        if SkinnedRunner.dipProbe, let sp = players["sprint"], let foot = poseBones["LeftFoot"], let c = characterContainer {
+            let rel = foot.presentation.worldPosition.z - root.presentation.worldPosition.z
+            print(String(format: "SPRINT clip=%@ speed=%.2f blend=%.2f paused=%d attached=%d footRelZ=%+.3f",
+                         currentClip ?? "-", sp.speed, sp.blendFactor, sp.paused ? 1 : 0,
+                         c.animationPlayer(forKey: "sprint") === sp ? 1 : 0, rel))
+        }
         if SkinnedRunner.dipProbe, let head = poseBones["Head"], let hips = hipsBone {
             let h = head.presentation.worldPosition
             let hp = hips.presentation.worldPosition
