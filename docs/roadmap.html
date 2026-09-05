@@ -274,6 +274,64 @@
     letter-spacing: 0.02em;
   }
 
+
+  /* ——— Your athlete (pillar, not a phase) ——— */
+  .phase.pillar { grid-template-columns: 110px 1fr; }
+  @media (max-width: 560px) { .phase.pillar { grid-template-columns: 1fr; } }
+  .phase.pillar .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    color: var(--gold);
+    padding-top: 6px;
+    line-height: 1.5;
+  }
+  .phase.pillar .num small { color: var(--dim); margin-bottom: 4px; }
+  .phase .rule { font-family: var(--mono); font-size: 12.5px; color: var(--gold); margin-top: 12px; }
+
+  .attr-row { display: grid; grid-template-columns: 1.15fr 1fr; gap: 18px; margin-bottom: 26px; }
+  @media (max-width: 720px) { .attr-row { grid-template-columns: 1fr; } }
+  .attr-board {
+    background: linear-gradient(180deg, #121a3c, var(--night-3));
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 22px 24px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+  }
+  @media (max-width: 480px) { .attr-board { grid-template-columns: 1fr; } }
+  .attr-board svg { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 auto; }
+  .attr-readout { font-family: var(--mono); font-size: 12.5px; color: var(--dim); line-height: 1.9; min-width: 128px; }
+  .attr-readout b { color: var(--chalk); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .attr-readout .lvl { font-family: var(--display); font-size: 40px; color: var(--gold); line-height: 1; letter-spacing: 0.02em; margin-bottom: 4px; }
+  .attr-readout .cls { color: var(--led); letter-spacing: 0.14em; font-weight: 600; font-size: 11px; margin-bottom: 10px; }
+  .attr-readout .bar { height: 5px; background: var(--night); border-radius: 3px; overflow: hidden; margin: 6px 0 2px; }
+  .attr-readout .bar i { display: block; height: 100%; width: 78%; background: var(--gold); }
+  .attr-readout .mock { margin-top: 12px; font-size: 10.5px; letter-spacing: 0.12em; color: var(--dim); }
+
+  .cost { width: 100%; border-collapse: collapse; font-size: 14.5px; margin-top: 4px; }
+  .cost th, .cost td { text-align: left; padding: 11px 12px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+  .cost th { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; color: var(--dim); text-transform: uppercase; border-top: 0; padding-top: 0; }
+  .cost td:first-child { color: var(--chalk); font-weight: 600; white-space: nowrap; }
+  .cost td { color: var(--dim); }
+  .cost .when { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; white-space: nowrap; }
+  .cost .when.now { color: var(--gold); }
+  .cost .when.next { color: var(--led); }
+  .cost .when.later { color: var(--clay); }
+  .cost-wrap { overflow-x: auto; }
+
+  .refs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+  @media (max-width: 720px) { .refs { grid-template-columns: 1fr; } }
+  .refs figure { background: var(--night-3); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .refs figure img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: top; background: var(--night); }
+  .refs figcaption { padding: 12px 14px 14px; font-size: 13.5px; color: var(--dim); line-height: 1.5; }
+  .refs figcaption b { display: block; color: var(--chalk); font-weight: 600; margin-bottom: 3px; }
+  .refs figcaption .src { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; color: var(--dim); margin-top: 8px; }
+  .refs-note { font-family: var(--mono); font-size: 12px; color: var(--dim); margin-top: 12px; }
+
   /* ——— Finish line ——— */
   footer.finish {
     margin-top: 72px;
@@ -462,6 +520,137 @@
           </div>
         </div>
       </div>
+    </div>
+  </section>
+
+
+  <section class="block" id="athlete">
+    <div class="wrap">
+      <div class="session-head"><span class="tag">PILLAR · YOUR ATHLETE</span><h2>Make it yours</h2></div>
+      <p class="session-intro">Not a phase — a pillar that cuts across Phase 6 (development) and Phase 10
+      (ranked). One athlete, created and owned by the player, whose shape on the attribute screen
+      <em>is</em> how they run. Vision only; nothing here is scheduled.</p>
+
+      <div class="attr-row">
+        <div class="attr-board">
+          <svg viewBox="0 0 340 330" role="img" aria-label="Attribute radar: seven sprint attributes for one athlete"><circle cx="170" cy="168" r="118" fill="none" stroke="#232b4d" stroke-width="1" stroke-dasharray="2 4"/><polygon points="170.0,145.0 188.0,153.7 192.4,173.1 180.0,188.7 160.0,188.7 147.6,173.1 152.0,153.7" fill="none" stroke="#232b4d" stroke-width="1"/><polygon points="170.0,122.0 206.0,139.3 214.8,178.2 190.0,209.4 150.0,209.4 125.2,178.2 134.0,139.3" fill="none" stroke="#232b4d" stroke-width="1"/><polygon points="170.0,99.0 223.9,125.0 237.3,183.4 199.9,230.2 140.1,230.2 102.7,183.4 116.1,125.0" fill="none" stroke="#232b4d" stroke-width="1"/><polygon points="170.0,76.0 241.9,110.6 259.7,188.5 209.9,250.9 130.1,250.9 80.3,188.5 98.1,110.6" fill="none" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="170.0" y2="76.0" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="241.9" y2="110.6" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="259.7" y2="188.5" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="209.9" y2="250.9" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="130.1" y2="250.9" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="80.3" y2="188.5" stroke="#232b4d" stroke-width="1"/><line x1="170" y1="168" x2="98.1" y2="110.6" stroke="#232b4d" stroke-width="1"/><polygon points="170.0,111.0 209.6,136.5 248.9,186.0 197.9,226.0 144.5,221.0 118.0,179.9 118.2,126.7" fill="rgba(255,213,38,0.22)" stroke="#ffd526" stroke-width="1.8" stroke-linejoin="round"/><circle cx="170.0" cy="111.0" r="2.6" fill="#ffd526"/><circle cx="209.6" cy="136.5" r="2.6" fill="#ffd526"/><circle cx="248.9" cy="186.0" r="2.6" fill="#ffd526"/><circle cx="197.9" cy="226.0" r="2.6" fill="#ffd526"/><circle cx="144.5" cy="221.0" r="2.6" fill="#ffd526"/><circle cx="118.0" cy="179.9" r="2.6" fill="#ffd526"/><circle cx="118.2" cy="126.7" r="2.6" fill="#ffd526"/><circle cx="170.0" cy="52.0" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="170.0" y="52.0" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">RX</text><text x="170.0" y="32.0" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">REACTION</text><circle cx="260.7" cy="95.7" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="260.7" y="95.7" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">DR</text><text x="276.7" y="95.7" text-anchor="start" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">DRIVE</text><circle cx="283.1" cy="193.8" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="283.1" y="193.8" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">TS</text><text x="299.1" y="193.8" text-anchor="start" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">TOP SPEED</text><circle cx="220.3" cy="272.5" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="220.3" y="272.5" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">SE</text><text x="236.3" y="272.5" text-anchor="start" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">SPEED END.</text><circle cx="119.7" cy="272.5" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="119.7" y="272.5" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">TQ</text><text x="103.7" y="272.5" text-anchor="end" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">TECHNIQUE</text><circle cx="56.9" cy="193.8" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="56.9" y="193.8" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">PW</text><text x="40.9" y="193.8" text-anchor="end" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">POWER</text><circle cx="79.3" cy="95.7" r="13" fill="#0d1226" stroke="#59d9ff" stroke-width="1.2"/><text x="79.3" y="95.7" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="9.5" font-weight="600" fill="#59d9ff">CP</text><text x="63.3" y="95.7" text-anchor="end" dominant-baseline="central" font-family="IBM Plex Mono, Menlo, monospace" font-size="8.5" fill="#8b92ad">COMPOSURE</text></svg>
+          <div class="attr-readout">
+            <div class="cls">FLYER · TOP-END BUILD</div>
+            <div class="lvl">LVL 14</div>
+            EXP <b>18,420</b><div class="bar"><i></i></div>to next <b>1,580</b><br>
+            PB <b>10.04</b><br>
+            races <b>212</b>
+            <div class="mock">MOCK · EXAMPLE VALUES</div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>Why the radial graph</h3>
+          <p>The touchstone is the Budokai 3 attribute menu: seven axes around a ring, one glance,
+          and the <strong style="color: var(--chalk)">shape is the fighter</strong>. Here the axes are
+          the seven things that decide a 100m — reaction, drive, top speed, speed endurance,
+          technique, power, composure — so a Starter and a Flyer look different before they ever
+          line up.</p>
+          <p>The shape isn't cosmetic. Each axis maps to a term the race engine already has:
+          reaction window, drive curve, v-max, deceleration, form tolerance, launch impulse,
+          band steadiness under pressure.</p>
+        </div>
+      </div>
+
+      <div class="phase pillar">
+        <div class="num"><small>STEP</small>CREATE</div>
+        <div>
+          <h3>Create the athlete</h3>
+          <p>Gender, build, skin tone, hair, uniform, accessories — and <strong>running form</strong>,
+          which is a parameter set, not a costume: stride length, cadence, arm carriage, drive lean.
+          Form changes how the race looks and how it plays.</p>
+          <div class="chips">
+            <span class="chip">gender</span><span class="chip">muscular build</span><span class="chip">skin tone</span>
+            <span class="chip">hairstyle</span><span class="chip">uniform</span><span class="chip">spikes</span>
+            <span class="chip">accessories</span><span class="chip">running form</span>
+          </div>
+          <div class="mkt"><span class="mkt-tag">MKT</span><span>Speed Stars ships customization already. The difference has to be that form and attributes drive the simulation, not just the look.</span></div>
+        </div>
+      </div>
+
+      <div class="phase pillar">
+        <div class="num"><small>STEP</small>GROW</div>
+        <div>
+          <h3>EXP and levels</h3>
+          <p>Every race pays out — time, place, a PB, a clean form line at the gun. Levels grant
+          attribute points spent on the radar; class caps keep a Flyer from also being the
+          best starter. The graph fills in over a season the way a real athlete's does.</p>
+          <div class="chips">
+            <span class="chip">EXP per race</span><span class="chip">levels</span><span class="chip">attribute points</span>
+            <span class="chip">class caps</span><span class="chip">seasons</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase pillar">
+        <div class="num"><small>STEP</small>SPECIALISE</div>
+        <div>
+          <h3>Classes and the skill tree</h3>
+          <p>Some people are strong starters, some have crazy top-end. Classes make that a
+          choice, and the tree gives each one abilities that stay <strong>inside the sport</strong>:
+          a wider reaction window, a second gear at 60m, a dip that's worth more, decel that bites
+          later.</p>
+          <div class="chips">
+            <span class="chip">Starter</span><span class="chip">Driver</span><span class="chip">Flyer</span>
+            <span class="chip">Closer</span><span class="chip">Technician</span>
+            <span class="chip">hair trigger</span><span class="chip">second gear</span>
+            <span class="chip">afterburner</span><span class="chip">hold the line</span>
+          </div>
+          <div class="rule">the fire off the spikes is the first afterburner — a power-up before it's a power-up</div>
+        </div>
+      </div>
+
+      <div class="phase pillar">
+        <div class="num"><small>STEP</small>COMPETE</div>
+        <div>
+          <h3>Servers and ranked</h3>
+          <p>Join a server, race people of similar skill <em>and</em> similar attributes — a rating
+          for the thumbs, a band for the build — with seasons and a ladder. This is Phase 10's
+          multiplayer wearing the athlete you made.</p>
+          <div class="chips">
+            <span class="chip">servers</span><span class="chip">skill rating</span><span class="chip">attribute band</span>
+            <span class="chip">ranked ladder</span><span class="chip">seasons</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: 6px;">
+        <h3>What it takes</h3>
+        <div class="cost-wrap">
+        <table class="cost">
+          <thead><tr><th>Piece</th><th>When</th><th>How</th></tr></thead>
+          <tbody>
+            <tr><td>Skin tone, kit colours, spikes</td><td class="when now">NOW</td><td>Materials. The kit tint already exists; skin is one more material slot.</td></tr>
+            <tr><td>Running form</td><td class="when now">NOW</td><td>Stride boost, cadence clamp, lean and dip are already parameters on the runner. Expose them per athlete.</td></tr>
+            <tr><td>Build, gender, hair, uniforms</td><td class="when next">NEXT</td><td>A modular body: one base mesh with blend shapes for build and gender, clothing and hair as separate meshes rigged to the same Mixamo skeleton (Blender, or Character Creator 4 for the base). Existing clips keep working.</td></tr>
+            <tr><td>Gait that looks like the reference clip</td><td class="when next">NEXT</td><td>A sprint cycle with a real flight phase — video-to-mocap from footage we film ourselves. Original motion, like the athletes.</td></tr>
+            <tr><td>Attribute screen, EXP, classes</td><td class="when later">LATER</td><td>Local first: the radar and the tree can run entirely on-device against the race engine's terms.</td></tr>
+            <tr><td>Accounts, servers, ranked</td><td class="when later">LATER</td><td>Backend. Belongs to Phase 10 and stays parked until the 100m earns it.</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+
+      <h3 style="font-family: var(--display); font-weight: 400; font-size: 21px; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 30px;">Visual references</h3>
+      <div class="refs">
+        <figure>
+          <img src="refs/budokai3-attributes.webp" alt="Dragon Ball Z: Budokai 3 character attribute menu — a seven-axis radial graph with kanji badges beside bead-style stat bars">
+          <figcaption><b>The radial graph</b>Seven axes around a ring, kanji badges on the rim, bead bars underneath. One glance tells you who the fighter is. The touchstone.<span class="src">DRAGON BALL Z: BUDOKAI 3 · ATTRIBUTE MENU</span></figcaption>
+        </figure>
+        <figure>
+          <img src="refs/character-dashboard.png" alt="Character dashboard concept — a hero render centred, stat bars on the left, per-discipline level progress on the right, rank percentages with sparklines">
+          <figcaption><b>The dashboard</b>The athlete owns the frame; stats live on the left, progress per discipline on the right, rank as a percentage with a trend. Dark ground, one green accent.<span class="src">CHARACTER DASHBOARD CONCEPT · UI INSPIRATION</span></figcaption>
+        </figure>
+        <figure>
+          <img src="refs/character-select.webp" alt="Character select concept — class emblems down the left, a level bar, stats as tick bars, three skill icons and a single CHOOSE button; a second screen details one skill's active and passive">
+          <figcaption><b>The class select</b>Class emblems in a column, a level bar, stats as tick marks, three skills and one CHOOSE. The second screen shows a skill's active and passive — the shape of our tree.<span class="src">CHARACTER SELECT CONCEPT · UI INSPIRATION</span></figcaption>
+        </figure>
+      </div>
+      <p class="refs-note">REFERENCES ONLY — inspiration for structure and feel. Nothing here is a likeness, a licence, or a visual identity to copy.</p>
     </div>
   </section>
 

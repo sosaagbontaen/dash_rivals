@@ -43,6 +43,32 @@ Create a fictional athlete; develop acceleration, top speed, speed endurance, re
 technique, stamina, specialization. Training mini-games that stay connected to actual
 track performance — not a generic RPG.
 
+## Pillar — Your Athlete (cuts across Phases 6 and 10)
+
+Vision only. One athlete, created and owned by the player, whose shape on the
+attribute screen *is* how they run.
+
+- **Create** — gender, build, skin tone, hair, uniform, spikes, accessories, and
+  running form (stride, cadence, arm carriage, lean) as parameters, not costume.
+- **Grow** — EXP per race (time, place, PB, clean form), levels, attribute points
+  spent on a seven-axis radial graph: reaction, drive, top speed, speed endurance,
+  technique, power, composure. Class caps.
+- **Specialise** — classes (Starter, Driver, Flyer, Closer, Technician) and a skill
+  tree whose abilities stay inside the sport: reaction window, second gear at 60m,
+  a dip worth more, decel that bites later. The fire off the spikes is the first
+  "afterburner".
+- **Compete** — servers, ranked matchmaking by skill rating and attribute band,
+  seasons, ladders (Phase 10 wearing the athlete you made).
+
+What it takes: materials now (skin, kit); form is already parameters; a modular
+body (base mesh + blend shapes, clothing/hair meshes on the same Mixamo skeleton)
+next; a sprint clip with a real flight phase from self-filmed video-to-mocap next;
+attribute screen/EXP/classes later, on-device; accounts/servers/ranked later.
+
+Visual references (in `docs/refs/`, see the roadmap page): DBZ Budokai 3's
+attribute menu (the radial graph is the touchstone), a character-dashboard concept,
+a character-select concept.
+
 ## Phase 7 — The Simulation Engine
 Construct hypothetical races: pick 8 athletes, distance, stadium, weather, wind,
 altitude, track, era, attributes → SIMULATE → watch. Taps directly into
